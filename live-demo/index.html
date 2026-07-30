@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>box3d-minc — sample browser</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #161926; overflow: hidden; width: 100vw; height: 100vh; }
+canvas { display: block; width: 100%; height: 100%; }
+#loading {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  color: #9aa0b8; text-align: center;
+  font-family: 'Cascadia Mono','Fira Code','JetBrains Mono','Consolas',monospace;
+  font-size: 13px; line-height: 1.6;
+}
+#loading b { color: #c8cee0; font-weight: 600; }
+#threads-badge {
+  position: absolute; right: 10px; bottom: 10px; padding: 3px 8px;
+  border-radius: 4px; font-family: 'Cascadia Mono','Consolas',monospace;
+  font-size: 11px; opacity: .85; text-decoration: none;
+}
+#threads-badge:hover { opacity: 1; }
+#threads-badge:not([href]) { pointer-events: none; }
+.t-on { background: #14432a; color: #7ee2a8; }
+.t-off { background: #4a2323; color: #e2938d; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="loading"><b>box3d sample browser</b><br>loading…</div>
+<a id="threads-badge" class="t-off">threads: …</a>
+<script>
+// Sticky serial override: ?threads=0 forces the single-threaded build
+// and is remembered, ?threads=auto clears it. Remembered from the URL
+// rather than from a click, so it still takes if the threaded build
+// wedged the page. Runs above coi-serviceworker and the loader, which
+// both read the param themselves.
+(function () {
+  try {
+    const q = new URLSearchParams(location.search).get('threads');
+    if (q === '0') { localStorage.setItem('box3d-threads', '0'); }
+    else if (q === 'auto') { localStorage.removeItem('box3d-threads'); }
+    else if (localStorage.getItem('box3d-threads') === '0') { location.replace('?threads=0'); }
+  } catch (e) { /* storage blocked */ }
+}());
+</script>
+<script src="coi-serviceworker.js"></script>
+<script src="sokol_wasm_host.js"></script>
+<script>
+// The Workers slider in the Solver panel is live when the badge says
+// ON; benchmarks scale with it. Falls back to the single-threaded
+// build when isolation is unavailable (?threads=0 forces it).
+const loadingEl = document.getElementById('loading');
+const badge = document.getElementById('threads-badge');
+const forcedOff = new URLSearchParams(location.search).get('threads') === '0';
+let phase = 'init';
+
+function showError(label, err) {
+  const name = err && err.name ? err.name : 'Error';
+  const msg = (err && (err.message || err.toString())) || String(err);
+  loadingEl.innerHTML =
+    '<div style="color:#f88;font-weight:bold;">' + label + '</div>' +
+    '<div style="color:#fbb;margin-top:6px;font-size:12px;">phase: ' + phase + '</div>' +
+    '<div style="color:#fbb;margin-top:6px;font-size:12px;max-width:80vw;">' +
+    name + ': ' + msg.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</div>';
+  loadingEl.style.display = '';
+}
+window.addEventListener('error', e => showError('window.error', e.error || { message: e.message }));
+window.addEventListener('unhandledrejection', e => showError('unhandledrejection', e.reason));
+
+// There is no filesystem in the browser: the host fetches these into
+// its VFS and file_read() opens them by the same path.
+const MESH_ASSETS = [
+  'building', 'collision_mesh_01', 'conveyor', 'single_triangle', 'stairs',
+  'test_map01', 'voxel_mesh_01', 'voxel_mesh_02', 'voxel_mesh_03', 'voxel_mesh_04',
+].map(n => 'data/meshes/' + n + '.obj')
+  .concat(['bounds01', 'bounds02', 'bounds03'].map(n => 'data/trees/' + n + '.txt'));
+
+async function init() {
+  try {
+    phase = 'assets';
+    await window.sokolWasm.preloadAssets(MESH_ASSETS);
+    phase = 'run';
+    loadingEl.style.display = 'none';
+    // The Workers slider caps at cpu_count, so cores-1 threads suffice.
+    const pool = Math.min(32, navigator.hardwareConcurrency || 8);
+    await window.sokolWasm.runAuto('./sample_browser', { pool });
+    const on = window.sokolWasm.threadsActive;
+    badge.className = on ? 't-on' : 't-off';
+    // The badge is also the switch: a sample that faults under the
+    // threaded build needs a way back without editing the URL.
+    if (forcedOff) {
+      badge.textContent = 'threads: off (forced) · switch on';
+      badge.href = '?threads=auto';
+    } else if (on) {
+      badge.textContent = 'threads: ON (' + (navigator.hardwareConcurrency || '?') +
+                          ' cores) · switch off';
+      badge.href = '?threads=0';
+    } else {
+      badge.textContent = 'threads: off';   // unavailable, nothing to switch
+    }
+    phase = 'done';
+  } catch (e) {
+    showError('sample browser failed', e);
+    console.error(e);
+  }
+}
+init();
+</script>
+</body>
+</html>

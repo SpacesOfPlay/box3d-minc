@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>box3d — parallel solver (wasm threads)</title>
+<style>
+body { font-family: 'Cascadia Mono','Consolas',ui-monospace,monospace; background: #161926; color: #c8cee0; margin: 2rem; }
+h1 { font-size: 1.05rem; color: #e8ecf8; }
+p { color: #9aa0b8; font-size: 13px; max-width: 46rem; line-height: 1.6; }
+#mode { padding: .3rem .6rem; border-radius: 4px; display: inline-block; margin: .5rem 0; font-size: 13px; }
+.on { background: #14432a; color: #7ee2a8; }
+.off { background: #4a2323; color: #e2938d; }
+button { font: inherit; padding: .4rem 1rem; margin-right: .5rem; background: #232a40; color: #c8cee0; border: 1px solid #38405c; border-radius: 4px; cursor: pointer; }
+button:disabled { opacity: .4; cursor: default; }
+pre { background: #0d0f18; padding: 1rem; border-radius: 4px; min-height: 6rem; white-space: pre-wrap; font-size: 13px; }
+a { color: #8ab4f8; }
+</style>
+</head>
+<body>
+<h1>box3d — parallel solver benchmark</h1>
+<p>1080 steps of the hero scene, headless. With cross-origin isolation
+the solver runs on a worker pool (4-way); without it the same page
+falls back to the single-threaded build. The checksum is identical
+either way — the parallel solver is deterministic.</p>
+<div id="mode">detecting…</div>
+<div>
+<button id="run" disabled>run bench</button>
+<a href="?threads=0">force serial</a> · <a href="?threads=auto">auto</a> · <a href="index.html">sample browser</a>
+</div>
+<pre id="out"></pre>
+<script>
+// Sticky serial override, shared with index.html: ?threads=0 forces the
+// single-threaded build and is remembered, ?threads=auto clears it.
+// Runs above coi-serviceworker and the loader, which both read the
+// param themselves.
+(function () {
+  try {
+    const q = new URLSearchParams(location.search).get('threads');
+    if (q === '0') { localStorage.setItem('box3d-threads', '0'); }
+    else if (q === 'auto') { localStorage.removeItem('box3d-threads'); }
+    else if (localStorage.getItem('box3d-threads') === '0') { location.replace('?threads=0'); }
+  } catch (e) { /* storage blocked */ }
+}());
+</script>
+<script src="coi-serviceworker.js"></script>
+<script src="wasm_threads_host.js"></script>
+<script>
+'use strict';
+const out = document.getElementById('out');
+const modeEl = document.getElementById('mode');
+const runBtn = document.getElementById('run');
+const log = (s) => { out.textContent += s; };
+
+const det = mincThreads.detect();
+modeEl.textContent = det.ok ? 'threads: available' : 'threads: off — ' + det.reason;
+modeEl.className = det.ok ? 'on' : 'off';
+
+let app = null;
+mincThreads.load('./box3d_bench', { onWrite: log }).then((a) => {
+    app = a;
+    modeEl.textContent = a.threads ? 'threads: ON — pool of ' + a.workers + ' workers'
+                                   : 'threads: off — ' + a.reason;
+    modeEl.className = a.threads ? 'on' : 'off';
+    runBtn.disabled = false;
+    if (new URLSearchParams(location.search).get('run') === '1') runBtn.click();
+}).catch((e) => { log('load failed: ' + (e.message || e) + '\n'); });
+
+let ran = false;
+runBtn.onclick = () => {
+    if (ran) { location.reload(); return; }
+    runBtn.disabled = true;
+    log('running 1080 steps…\n');
+    setTimeout(() => {
+        try { app.exports.main(); }
+        catch (e) { if (!('mincExit' in e)) log('error: ' + (e.message || e) + '\n'); }
+        ran = true;
+        runBtn.textContent = 'run again (reloads)';
+        runBtn.disabled = false;
+    }, 30);
+};
+</script>
+</body>
+</html>

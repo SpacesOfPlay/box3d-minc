@@ -1,0 +1,60 @@
+# Publishes live-demo/ to GitHub Pages. The wasm is built here, not
+# committed — set Settings > Pages > Source to "GitHub Actions".
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Downloaded, not piped to bash: a piped script shares stdin with
+      # its own source.
+      - name: install minc
+        run: |
+          curl -fsSL https://minc.dev/install -o "$RUNNER_TEMP/install.sh"
+          bash "$RUNNER_TEMP/install.sh" < /dev/null
+          echo "$HOME/.minc" >> "$GITHUB_PATH"
+
+      - run: minc --version
+
+      # cwd is the repo root so `import box3d;` resolves against ./lib.
+      # Two artifacts per program: the loader picks .threads when the
+      # page is cross-origin isolated, the serial one otherwise. No -Os
+      # — it costs multiples of runtime on the solver.
+      - name: build live-demo
+        run: |
+          minc sample_browser/main.mc --target wasm -o live-demo/sample_browser.wasm
+          minc sample_browser/main.mc --target wasm --threads -o live-demo/sample_browser.threads.wasm
+          minc live-demo/box3d_bench.mc --target wasm -o live-demo/box3d_bench.wasm
+          minc live-demo/box3d_bench.mc --target wasm --threads -o live-demo/box3d_bench.threads.wasm
+          ls -l live-demo/*.wasm
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: live-demo
+
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

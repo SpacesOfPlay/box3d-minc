@@ -1,0 +1,6 @@
+build/
+*.exe
+*.pdb
+
+# Built by the pages workflow, not committed.
+live-demo/*.wasm

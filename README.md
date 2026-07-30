@@ -7,6 +7,8 @@ upstream sample browser: orbit/fly camera, mouse grab, Dear ImGui
 overlay, procedural sky. Runs natively (Win/macOS/Linux) or in the browser
 (WebAssembly + WebGL2).
 
+Live demo of wasm build: [sample browser](https://spacesofplay.github.io/box3d-minc/)
+
 ## Quickstart
 
 install minc if needed:

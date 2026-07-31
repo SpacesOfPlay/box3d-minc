@@ -2418,9 +2418,6 @@ struct b3OverflowBlock {
     i32 size;
 }
 
-// SPDX-FileCopyrightText: 2026 Erin Catto
-// SPDX-License-Identifier: MIT
-// Dirk Gregorius contributed portions of this code
 struct b3DynamicArray_b3OverflowBlock {
     b3OverflowBlock* data;
     i32 count;
@@ -3583,50 +3580,43 @@ struct b3RecArgs_DestroyWorld {
     b3RecCType_WORLDID world;
 }
 
-// World config. The world arg is informational; replay always targets its own world.
 struct b3RecArgs_Step {
     b3RecCType_WORLDID world;
     b3RecCType_F32 dt;
     b3RecCType_I32 subStepCount;
 }
 
-// Body
+// World config. The world arg is informational; replay always targets its own world.
 struct b3RecArgs_WorldEnableSleeping {
     b3RecCType_WORLDID world;
     b3RecCType_BOOL flag;
 }
 
-// Shape create/destroy
 struct b3RecArgs_WorldEnableContinuous {
     b3RecCType_WORLDID world;
     b3RecCType_BOOL flag;
 }
 
-// Shape mutators
 struct b3RecArgs_WorldSetRestitutionThreshold {
     b3RecCType_WORLDID world;
     b3RecCType_F32 value;
 }
 
-// Joint create and destroy
 struct b3RecArgs_WorldSetHitEventThreshold {
     b3RecCType_WORLDID world;
     b3RecCType_F32 value;
 }
 
-// Generic joint mutators
 struct b3RecArgs_WorldSetGravity {
     b3RecCType_WORLDID world;
     b3RecCType_VEC3 gravity;
 }
 
-// Parallel joint
 struct b3RecArgs_WorldExplode {
     b3RecCType_WORLDID world;
     b3RecCType_EXPLOSIONDEF def;
 }
 
-// Distance joint
 struct b3RecArgs_WorldSetContactTuning {
     b3RecCType_WORLDID world;
     b3RecCType_F32 hertz;
@@ -3634,63 +3624,51 @@ struct b3RecArgs_WorldSetContactTuning {
     b3RecCType_F32 contactSpeed;
 }
 
-// Motor joint
 struct b3RecArgs_WorldSetContactRecycleDistance {
     b3RecCType_WORLDID world;
     b3RecCType_F32 recycleDistance;
 }
 
-// Prismatic joint
 struct b3RecArgs_WorldSetMaximumLinearSpeed {
     b3RecCType_WORLDID world;
     b3RecCType_F32 maximumLinearSpeed;
 }
 
-// Revolute joint
 struct b3RecArgs_WorldEnableWarmStarting {
     b3RecCType_WORLDID world;
     b3RecCType_BOOL flag;
 }
 
-// Spherical joint
 struct b3RecArgs_WorldRebuildStaticTree {
     b3RecCType_WORLDID world;
 }
 
-// Weld joint
 struct b3RecArgs_WorldEnableSpeculative {
     b3RecCType_WORLDID world;
     b3RecCType_BOOL flag;
 }
 
-// Wheel joint
+// Body
 struct b3RecArgs_CreateBody {
     b3RecCType_WORLDID world;
     b3RecCType_BODYDEF def;
 }
 
-// Wheel joint continued, overflow past the 0xDF range.
 struct b3RecArgs_DestroyBody {
     b3RecCType_BODYID body;
 }
 
-// Spatial queries. Inputs flow through the manifest (reader side). The hit tail and result are
-// hand-written in recording.c / recording_replay.c since they are variable length.
 struct b3RecArgs_BodySetTransform {
     b3RecCType_BODYID body;
     b3RecCType_POSITION position;
     b3RecCType_QUAT rotation;
 }
 
-// Identity key (hash of the caller id + label) for the query that immediately follows. Emitted only
-// for a tagged query. The id and label are interned in the trailing tag table, so only the 8 byte key
-// rides the stream.
 struct b3RecArgs_BodySetLinearVelocity {
     b3RecCType_BODYID body;
     b3RecCType_VEC3 v;
 }
 
-// Accumulated world bounds over the whole recording, written once at stop.
 struct b3RecArgs_BodySetType {
     b3RecCType_BODYID body;
     b3RecCType_I32 type;
@@ -3823,6 +3801,7 @@ struct b3RecArgs_BodyAllowFastRotation {
     b3RecCType_BOOL flag;
 }
 
+// Shape create/destroy
 struct b3RecArgs_CreateSphereShape {
     b3RecCType_BODYID body;
     b3RecCType_SHAPEDEF def;
@@ -3865,6 +3844,7 @@ struct b3RecArgs_DestroyShape {
     b3RecCType_BOOL updateBodyMass;
 }
 
+// Shape mutators
 struct b3RecArgs_ShapeSetDensity {
     b3RecCType_SHAPEID shape;
     b3RecCType_F32 density;
@@ -3936,6 +3916,7 @@ struct b3RecArgs_ShapeSetName {
     b3RecCType_STR name;
 }
 
+// Joint create and destroy
 struct b3RecArgs_CreateParallelJoint {
     b3RecCType_WORLDID world;
     b3RecCType_PARALLELJOINTDEF def;
@@ -3986,6 +3967,7 @@ struct b3RecArgs_DestroyJoint {
     b3RecCType_BOOL wakeAttached;
 }
 
+// Generic joint mutators
 struct b3RecArgs_JointSetLocalFrameA {
     b3RecCType_JOINTID joint;
     b3RecCType_TRANSFORM localFrame;
@@ -4021,6 +4003,7 @@ struct b3RecArgs_JointSetTorqueThreshold {
     b3RecCType_F32 threshold;
 }
 
+// Parallel joint
 struct b3RecArgs_ParallelJointSetSpringHertz {
     b3RecCType_JOINTID joint;
     b3RecCType_F32 hertz;
@@ -4036,6 +4019,7 @@ struct b3RecArgs_ParallelJointSetMaxTorque {
     b3RecCType_F32 maxTorque;
 }
 
+// Distance joint
 struct b3RecArgs_DistanceJointSetLength {
     b3RecCType_JOINTID joint;
     b3RecCType_F32 length;
@@ -4088,6 +4072,7 @@ struct b3RecArgs_DistanceJointSetMaxMotorForce {
     b3RecCType_F32 force;
 }
 
+// Motor joint
 struct b3RecArgs_MotorJointSetLinearVelocity {
     b3RecCType_JOINTID joint;
     b3RecCType_VEC3 velocity;
@@ -4138,6 +4123,7 @@ struct b3RecArgs_MotorJointSetMaxSpringTorque {
     b3RecCType_F32 maxTorque;
 }
 
+// Prismatic joint
 struct b3RecArgs_PrismaticJointEnableSpring {
     b3RecCType_JOINTID joint;
     b3RecCType_BOOL enableSpring;
@@ -4184,6 +4170,7 @@ struct b3RecArgs_PrismaticJointSetMaxMotorForce {
     b3RecCType_F32 force;
 }
 
+// Revolute joint
 struct b3RecArgs_RevoluteJointEnableSpring {
     b3RecCType_JOINTID joint;
     b3RecCType_BOOL enableSpring;
@@ -4230,6 +4217,7 @@ struct b3RecArgs_RevoluteJointSetMaxMotorTorque {
     b3RecCType_F32 torque;
 }
 
+// Spherical joint
 struct b3RecArgs_SphericalJointEnableConeLimit {
     b3RecCType_JOINTID joint;
     b3RecCType_BOOL enableLimit;
@@ -4286,6 +4274,7 @@ struct b3RecArgs_SphericalJointSetMaxMotorTorque {
     b3RecCType_F32 torque;
 }
 
+// Weld joint
 struct b3RecArgs_WeldJointSetLinearHertz {
     b3RecCType_JOINTID joint;
     b3RecCType_F32 hertz;
@@ -4306,6 +4295,7 @@ struct b3RecArgs_WeldJointSetAngularDampingRatio {
     b3RecCType_F32 dampingRatio;
 }
 
+// Wheel joint
 struct b3RecArgs_WheelJointEnableSuspension {
     b3RecCType_JOINTID joint;
     b3RecCType_BOOL flag;
@@ -4342,6 +4332,7 @@ struct b3RecArgs_WheelJointSetSpinMotorSpeed {
     b3RecCType_F32 speed;
 }
 
+// Wheel joint continued, overflow past the 0xDF range.
 struct b3RecArgs_WheelJointSetMaxSpinTorque {
     b3RecCType_JOINTID joint;
     b3RecCType_F32 torque;
@@ -4383,6 +4374,8 @@ struct b3RecArgs_WheelJointSetTargetSteeringAngle {
     b3RecCType_F32 radians;
 }
 
+// Spatial queries. Inputs flow through the manifest (reader side). The hit tail and result are
+// hand-written in recording.c / recording_replay.c since they are variable length.
 struct b3RecArgs_QueryOverlapAABB {
     b3RecCType_WORLDID world;
     b3RecCType_AABB aabb;
@@ -4433,6 +4426,9 @@ struct b3RecArgs_QueryCollideMover {
     b3RecCType_QUERYFILTER filter;
 }
 
+// Identity key (hash of the caller id + label) for the query that immediately follows. Emitted only
+// for a tagged query. The id and label are interned in the trailing tag table, so only the 8 byte key
+// rides the stream.
 struct b3RecArgs_QueryTag {
     b3RecCType_U64 key;
 }
@@ -4442,6 +4438,7 @@ struct b3RecArgs_StateHash {
     b3RecCType_U64 hash;
 }
 
+// Accumulated world bounds over the whole recording, written once at stop.
 struct b3RecArgs_RecordingBounds {
     b3RecCType_AABB bounds;
 }
@@ -4993,6 +4990,9 @@ struct b3JointPair {
     b3JointSim* jointSim;
 }
 
+// SPDX-FileCopyrightText: 2026 Erin Catto
+// SPDX-License-Identifier: MIT
+// Dirk Gregorius contributed portions of this code
 struct b3DynamicArray_b3VertexNode {
     b3VertexNode* data;
     i32 count;
@@ -5751,9 +5751,7 @@ b3ContactId b3LoadContactId(u32* values) {
     return id;
 }
 }
-// Valid in both modes: 0.0f promotes to double, the identity rotation stays float
 b3Vec3 b3Vec3_zero = b3Vec3{0.0f, 0.0f, 0.0f};
-// Write tree struct
 b3Vec3 b3Vec3_one = b3Vec3{1.0f, 1.0f, 1.0f};
 b3Vec3 b3Vec3_axisX = b3Vec3{1.0f, 0.0f, 0.0f};
 b3Vec3 b3Vec3_axisY = b3Vec3{0.0f, 1.0f, 0.0f};
@@ -5762,6 +5760,7 @@ b3Quat b3Quat_identity = b3Quat{b3Vec3{0.0f, 0.0f, 0.0f}, 1.0f};
 b3Transform b3Transform_identity = b3Transform{b3Vec3{0.0f, 0.0f, 0.0f}, b3Quat{b3Vec3{0.0f, 0.0f, 0.0f}, 1.0f}};
 b3Matrix3 b3Mat3_zero = b3Matrix3{b3Vec3{0.0f, 0.0f, 0.0f}, b3Vec3{0.0f, 0.0f, 0.0f}, b3Vec3{0.0f, 0.0f, 0.0f}};
 b3Matrix3 b3Mat3_identity = b3Matrix3{b3Vec3{1.0f, 0.0f, 0.0f}, b3Vec3{0.0f, 1.0f, 0.0f}, b3Vec3{0.0f, 0.0f, 1.0f}};
+// Valid in both modes: 0.0f promotes to double, the identity rotation stays float
 b3Pos b3Pos_zero = b3Pos{0.0f, 0.0f, 0.0f};
 b3WorldTransform b3WorldTransform_identity = b3WorldTransform{{0.0f, 0.0f, 0.0f}, {{0.0f, 0.0f, 0.0f}, 1.0f}};
 /// @return the minimum of two integers.
@@ -11022,6 +11021,7 @@ b3MeshMap_itr b3MeshMap_erase_itr(b3MeshMap* table, b3MeshMap_itr itr) {
 /*                                              Function implementations                                              */
 /*--------------------------------------------------------------------------------------------------------------------*/
 when !(defined(HEADER_MODE)) {
+// Default settings.
 private {
 void b3MeshMap_init(b3MeshMap* table) {
     table.key_count = 0;
@@ -11246,6 +11246,10 @@ bool b3MeshMap_rehash(b3MeshMap* table, u64 bucket_count) {
         return true;
     }
 }
+// Inserts a key, replacing the existing key if it already exists.
+// This function wraps insert_raw in a loop that handles growing and rehashing the table if a new key cannot be inserted
+// because of the maximum load factor or displacement limit constraints.
+// Returns an iterator to the inserted key, or an end iterator in the case of allocation failure.
 b3MeshMap_itr b3MeshMap_insert(b3MeshMap* table, b3MeshData* key, i32 val) {
     while true {
         b3MeshMap_itr itr = b3MeshMap_insert_raw(table, key, &val, false, true);
@@ -11254,6 +11258,8 @@ b3MeshMap_itr b3MeshMap_insert(b3MeshMap* table, b3MeshData* key, i32 val) {
         }
     }
 }
+// Same as NAME_insert, except that if the key already exists, no insertion occurs and the function returns an iterator
+// to the existing key.
 b3MeshMap_itr b3MeshMap_get_or_insert(b3MeshMap* table, b3MeshData* key, i32 val) {
     while true {
         b3MeshMap_itr itr = b3MeshMap_insert_raw(table, key, &val, false, false);
@@ -11262,6 +11268,7 @@ b3MeshMap_itr b3MeshMap_get_or_insert(b3MeshMap* table, b3MeshData* key, i32 val
         }
     }
 }
+// Returns an iterator pointing to the specified key, or an end iterator if the key does not exist.
 b3MeshMap_itr b3MeshMap_get(b3MeshMap* table, b3MeshData* key) {
     u64 hash = b3HashMesh(key);
     u64 home_bucket = hash & table.buckets_mask;
@@ -11282,6 +11289,15 @@ b3MeshMap_itr b3MeshMap_get(b3MeshMap* table, b3MeshData* key) {
         bucket = home_bucket + vt_quadratic(displacement) & table.buckets_mask;
     }
 }
+// Erases the key pointed to by the specified iterator.
+// The erasure always occurs at the end of the chain to which the key belongs.
+// If the key to be erased is not the last in the chain, it is swapped with the last so that erasure occurs at the end.
+// This helps keep a chain's keys close to their home bucket for the sake of cache locality.
+// Returns true if, in the case of iteration from first to end, NAME_next should now be called on the iterator to find
+// the next key.
+// This return value is necessary because at the iterator location, the erasure could result in an empty bucket, a
+// bucket containing a moved key already visited during the iteration, or a bucket containing a moved key not yet
+// visited.
 bool b3MeshMap_erase_itr_raw(b3MeshMap* table, b3MeshMap_itr itr) {
     --table.key_count;
     var itr_bucket = cast(u64, cast(i64, itr.metadatum - table.metadata));
@@ -11325,6 +11341,8 @@ bool b3MeshMap_erase_itr_raw(b3MeshMap* table, b3MeshMap_itr itr) {
         }
     }
 }
+// Erases the specified key, if it exists.
+// Returns true if a key was erased.
 bool b3MeshMap_erase(b3MeshMap* table, b3MeshData* key) {
     b3MeshMap_itr itr = b3MeshMap_get(table, key);
     if b3MeshMap_is_end(itr) != 0 {
@@ -12120,6 +12138,10 @@ bool b3MaterialMap_rehash(b3MaterialMap* table, u64 bucket_count) {
         return true;
     }
 }
+// Inserts a key, replacing the existing key if it already exists.
+// This function wraps insert_raw in a loop that handles growing and rehashing the table if a new key cannot be inserted
+// because of the maximum load factor or displacement limit constraints.
+// Returns an iterator to the inserted key, or an end iterator in the case of allocation failure.
 b3MaterialMap_itr b3MaterialMap_insert(b3MaterialMap* table, b3SurfaceMaterial* key, i32 val) {
     while true {
         b3MaterialMap_itr itr = b3MaterialMap_insert_raw(table, key, &val, false, true);
@@ -12128,6 +12150,8 @@ b3MaterialMap_itr b3MaterialMap_insert(b3MaterialMap* table, b3SurfaceMaterial* 
         }
     }
 }
+// Same as NAME_insert, except that if the key already exists, no insertion occurs and the function returns an iterator
+// to the existing key.
 b3MaterialMap_itr b3MaterialMap_get_or_insert(b3MaterialMap* table, b3SurfaceMaterial* key, i32 val) {
     while true {
         b3MaterialMap_itr itr = b3MaterialMap_insert_raw(table, key, &val, false, false);
@@ -12136,6 +12160,7 @@ b3MaterialMap_itr b3MaterialMap_get_or_insert(b3MaterialMap* table, b3SurfaceMat
         }
     }
 }
+// Returns an iterator pointing to the specified key, or an end iterator if the key does not exist.
 b3MaterialMap_itr b3MaterialMap_get(b3MaterialMap* table, b3SurfaceMaterial* key) {
     u64 hash = b3HashMaterial(key);
     u64 home_bucket = hash & table.buckets_mask;
@@ -12156,6 +12181,15 @@ b3MaterialMap_itr b3MaterialMap_get(b3MaterialMap* table, b3SurfaceMaterial* key
         bucket = home_bucket + vt_quadratic(displacement) & table.buckets_mask;
     }
 }
+// Erases the key pointed to by the specified iterator.
+// The erasure always occurs at the end of the chain to which the key belongs.
+// If the key to be erased is not the last in the chain, it is swapped with the last so that erasure occurs at the end.
+// This helps keep a chain's keys close to their home bucket for the sake of cache locality.
+// Returns true if, in the case of iteration from first to end, NAME_next should now be called on the iterator to find
+// the next key.
+// This return value is necessary because at the iterator location, the erasure could result in an empty bucket, a
+// bucket containing a moved key already visited during the iteration, or a bucket containing a moved key not yet
+// visited.
 bool b3MaterialMap_erase_itr_raw(b3MaterialMap* table, b3MaterialMap_itr itr) {
     --table.key_count;
     var itr_bucket = cast(u64, cast(i64, itr.metadatum - table.metadata));
@@ -12199,6 +12233,8 @@ bool b3MaterialMap_erase_itr_raw(b3MaterialMap* table, b3MaterialMap_itr itr) {
         }
     }
 }
+// Erases the specified key, if it exists.
+// Returns true if a key was erased.
 bool b3MaterialMap_erase(b3MaterialMap* table, b3SurfaceMaterial* key) {
     b3MaterialMap_itr itr = b3MaterialMap_get(table, key);
     if b3MaterialMap_is_end(itr) != 0 {
@@ -26263,6 +26299,10 @@ bool b3VertexMap_rehash(b3VertexMap* table, u64 bucket_count) {
         return true;
     }
 }
+// Inserts a key, replacing the existing key if it already exists.
+// This function wraps insert_raw in a loop that handles growing and rehashing the table if a new key cannot be inserted
+// because of the maximum load factor or displacement limit constraints.
+// Returns an iterator to the inserted key, or an end iterator in the case of allocation failure.
 b3VertexMap_itr b3VertexMap_insert(b3VertexMap* table, u64 key, i32 val) {
     while true {
         b3VertexMap_itr itr = b3VertexMap_insert_raw(table, key, &val, false, true);
@@ -26271,6 +26311,8 @@ b3VertexMap_itr b3VertexMap_insert(b3VertexMap* table, u64 key, i32 val) {
         }
     }
 }
+// Same as NAME_insert, except that if the key already exists, no insertion occurs and the function returns an iterator
+// to the existing key.
 b3VertexMap_itr b3VertexMap_get_or_insert(b3VertexMap* table, u64 key, i32 val) {
     while true {
         b3VertexMap_itr itr = b3VertexMap_insert_raw(table, key, &val, false, false);
@@ -26279,6 +26321,7 @@ b3VertexMap_itr b3VertexMap_get_or_insert(b3VertexMap* table, u64 key, i32 val) 
         }
     }
 }
+// Returns an iterator pointing to the specified key, or an end iterator if the key does not exist.
 b3VertexMap_itr b3VertexMap_get(b3VertexMap* table, u64 key) {
     u64 hash = vt_hash_integer(key);
     u64 home_bucket = hash & table.buckets_mask;
@@ -26299,6 +26342,15 @@ b3VertexMap_itr b3VertexMap_get(b3VertexMap* table, u64 key) {
         bucket = home_bucket + vt_quadratic(displacement) & table.buckets_mask;
     }
 }
+// Erases the key pointed to by the specified iterator.
+// The erasure always occurs at the end of the chain to which the key belongs.
+// If the key to be erased is not the last in the chain, it is swapped with the last so that erasure occurs at the end.
+// This helps keep a chain's keys close to their home bucket for the sake of cache locality.
+// Returns true if, in the case of iteration from first to end, NAME_next should now be called on the iterator to find
+// the next key.
+// This return value is necessary because at the iterator location, the erasure could result in an empty bucket, a
+// bucket containing a moved key already visited during the iteration, or a bucket containing a moved key not yet
+// visited.
 bool b3VertexMap_erase_itr_raw(b3VertexMap* table, b3VertexMap_itr itr) {
     --table.key_count;
     var itr_bucket = cast(u64, cast(i64, itr.metadatum - table.metadata));
@@ -26342,6 +26394,8 @@ bool b3VertexMap_erase_itr_raw(b3VertexMap* table, b3VertexMap_itr itr) {
         }
     }
 }
+// Erases the specified key, if it exists.
+// Returns true if a key was erased.
 bool b3VertexMap_erase(b3VertexMap* table, u64 key) {
     b3VertexMap_itr itr = b3VertexMap_get(table, key);
     if b3VertexMap_is_end(itr) != 0 {
@@ -27587,6 +27641,10 @@ bool b3EdgeMap_rehash(b3EdgeMap* table, u64 bucket_count) {
         return true;
     }
 }
+// Inserts a key, replacing the existing key if it already exists.
+// This function wraps insert_raw in a loop that handles growing and rehashing the table if a new key cannot be inserted
+// because of the maximum load factor or displacement limit constraints.
+// Returns an iterator to the inserted key, or an end iterator in the case of allocation failure.
 b3EdgeMap_itr b3EdgeMap_insert(b3EdgeMap* table, u64 key, i32 val) {
     while true {
         b3EdgeMap_itr itr = b3EdgeMap_insert_raw(table, key, &val, false, true);
@@ -27595,6 +27653,8 @@ b3EdgeMap_itr b3EdgeMap_insert(b3EdgeMap* table, u64 key, i32 val) {
         }
     }
 }
+// Same as NAME_insert, except that if the key already exists, no insertion occurs and the function returns an iterator
+// to the existing key.
 b3EdgeMap_itr b3EdgeMap_get_or_insert(b3EdgeMap* table, u64 key, i32 val) {
     while true {
         b3EdgeMap_itr itr = b3EdgeMap_insert_raw(table, key, &val, false, false);
@@ -27603,6 +27663,7 @@ b3EdgeMap_itr b3EdgeMap_get_or_insert(b3EdgeMap* table, u64 key, i32 val) {
         }
     }
 }
+// Returns an iterator pointing to the specified key, or an end iterator if the key does not exist.
 b3EdgeMap_itr b3EdgeMap_get(b3EdgeMap* table, u64 key) {
     u64 hash = vt_hash_integer(key);
     u64 home_bucket = hash & table.buckets_mask;
@@ -27623,6 +27684,15 @@ b3EdgeMap_itr b3EdgeMap_get(b3EdgeMap* table, u64 key) {
         bucket = home_bucket + vt_quadratic(displacement) & table.buckets_mask;
     }
 }
+// Erases the key pointed to by the specified iterator.
+// The erasure always occurs at the end of the chain to which the key belongs.
+// If the key to be erased is not the last in the chain, it is swapped with the last so that erasure occurs at the end.
+// This helps keep a chain's keys close to their home bucket for the sake of cache locality.
+// Returns true if, in the case of iteration from first to end, NAME_next should now be called on the iterator to find
+// the next key.
+// This return value is necessary because at the iterator location, the erasure could result in an empty bucket, a
+// bucket containing a moved key already visited during the iteration, or a bucket containing a moved key not yet
+// visited.
 bool b3EdgeMap_erase_itr_raw(b3EdgeMap* table, b3EdgeMap_itr itr) {
     --table.key_count;
     var itr_bucket = cast(u64, cast(i64, itr.metadatum - table.metadata));
@@ -27666,6 +27736,8 @@ bool b3EdgeMap_erase_itr_raw(b3EdgeMap* table, b3EdgeMap_itr itr) {
         }
     }
 }
+// Erases the specified key, if it exists.
+// Returns true if a key was erased.
 bool b3EdgeMap_erase(b3EdgeMap* table, u64 key) {
     b3EdgeMap_itr itr = b3EdgeMap_get(table, key);
     if b3EdgeMap_is_end(itr) != 0 {
@@ -30907,6 +30979,10 @@ bool b3NameMap_rehash(b3NameMap* table, u64 bucket_count) {
         return true;
     }
 }
+// Inserts a key, replacing the existing key if it already exists.
+// This function wraps insert_raw in a loop that handles growing and rehashing the table if a new key cannot be inserted
+// because of the maximum load factor or displacement limit constraints.
+// Returns an iterator to the inserted key, or an end iterator in the case of allocation failure.
 b3NameMap_itr b3NameMap_insert(b3NameMap* table, u32 key, i32 val) {
     while true {
         b3NameMap_itr itr = b3NameMap_insert_raw(table, key, &val, false, true);
@@ -30915,6 +30991,8 @@ b3NameMap_itr b3NameMap_insert(b3NameMap* table, u32 key, i32 val) {
         }
     }
 }
+// Same as NAME_insert, except that if the key already exists, no insertion occurs and the function returns an iterator
+// to the existing key.
 b3NameMap_itr b3NameMap_get_or_insert(b3NameMap* table, u32 key, i32 val) {
     while true {
         b3NameMap_itr itr = b3NameMap_insert_raw(table, key, &val, false, false);
@@ -30923,6 +31001,7 @@ b3NameMap_itr b3NameMap_get_or_insert(b3NameMap* table, u32 key, i32 val) {
         }
     }
 }
+// Returns an iterator pointing to the specified key, or an end iterator if the key does not exist.
 b3NameMap_itr b3NameMap_get(b3NameMap* table, u32 key) {
     u64 hash = vt_hash_integer(key);
     u64 home_bucket = hash & table.buckets_mask;
@@ -30943,6 +31022,15 @@ b3NameMap_itr b3NameMap_get(b3NameMap* table, u32 key) {
         bucket = home_bucket + vt_quadratic(displacement) & table.buckets_mask;
     }
 }
+// Erases the key pointed to by the specified iterator.
+// The erasure always occurs at the end of the chain to which the key belongs.
+// If the key to be erased is not the last in the chain, it is swapped with the last so that erasure occurs at the end.
+// This helps keep a chain's keys close to their home bucket for the sake of cache locality.
+// Returns true if, in the case of iteration from first to end, NAME_next should now be called on the iterator to find
+// the next key.
+// This return value is necessary because at the iterator location, the erasure could result in an empty bucket, a
+// bucket containing a moved key already visited during the iteration, or a bucket containing a moved key not yet
+// visited.
 bool b3NameMap_erase_itr_raw(b3NameMap* table, b3NameMap_itr itr) {
     --table.key_count;
     var itr_bucket = cast(u64, cast(i64, itr.metadatum - table.metadata));
@@ -30986,6 +31074,8 @@ bool b3NameMap_erase_itr_raw(b3NameMap* table, b3NameMap_itr itr) {
         }
     }
 }
+// Erases the specified key, if it exists.
+// Returns true if a key was erased.
 bool b3NameMap_erase(b3NameMap* table, u32 key) {
     b3NameMap_itr itr = b3NameMap_get(table, key);
     if b3NameMap_is_end(itr) != 0 {
@@ -35368,97 +35458,78 @@ void b3RecEndRecord(b3Recording* rec) {
 void b3RecWriteArgs_DestroyWorld(b3Recording* rec, b3RecArgs_DestroyWorld* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
 }
-// World config. The world arg is informational; replay always targets its own world.
 void b3RecWriteArgs_Step(b3Recording* rec, b3RecArgs_Step* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
     b3RecW_F32(&rec.buffer, a.dt);
     b3RecW_I32(&rec.buffer, a.subStepCount);
 }
-// Body
+// World config. The world arg is informational; replay always targets its own world.
 void b3RecWriteArgs_WorldEnableSleeping(b3Recording* rec, b3RecArgs_WorldEnableSleeping* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
     b3RecW_BOOL(&rec.buffer, a.flag);
 }
-// Shape create/destroy
 void b3RecWriteArgs_WorldEnableContinuous(b3Recording* rec, b3RecArgs_WorldEnableContinuous* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
     b3RecW_BOOL(&rec.buffer, a.flag);
 }
-// Shape mutators
 void b3RecWriteArgs_WorldSetRestitutionThreshold(b3Recording* rec, b3RecArgs_WorldSetRestitutionThreshold* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
     b3RecW_F32(&rec.buffer, a.value);
 }
-// Joint create and destroy
 void b3RecWriteArgs_WorldSetHitEventThreshold(b3Recording* rec, b3RecArgs_WorldSetHitEventThreshold* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
     b3RecW_F32(&rec.buffer, a.value);
 }
-// Generic joint mutators
 void b3RecWriteArgs_WorldSetGravity(b3Recording* rec, b3RecArgs_WorldSetGravity* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
     b3RecW_VEC3(&rec.buffer, a.gravity);
 }
-// Parallel joint
 void b3RecWriteArgs_WorldExplode(b3Recording* rec, b3RecArgs_WorldExplode* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
     b3RecW_EXPLOSIONDEF(&rec.buffer, a.def);
 }
-// Distance joint
 void b3RecWriteArgs_WorldSetContactTuning(b3Recording* rec, b3RecArgs_WorldSetContactTuning* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
     b3RecW_F32(&rec.buffer, a.hertz);
     b3RecW_F32(&rec.buffer, a.dampingRatio);
     b3RecW_F32(&rec.buffer, a.contactSpeed);
 }
-// Motor joint
 void b3RecWriteArgs_WorldSetContactRecycleDistance(b3Recording* rec, b3RecArgs_WorldSetContactRecycleDistance* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
     b3RecW_F32(&rec.buffer, a.recycleDistance);
 }
-// Prismatic joint
 void b3RecWriteArgs_WorldSetMaximumLinearSpeed(b3Recording* rec, b3RecArgs_WorldSetMaximumLinearSpeed* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
     b3RecW_F32(&rec.buffer, a.maximumLinearSpeed);
 }
-// Revolute joint
 void b3RecWriteArgs_WorldEnableWarmStarting(b3Recording* rec, b3RecArgs_WorldEnableWarmStarting* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
     b3RecW_BOOL(&rec.buffer, a.flag);
 }
-// Spherical joint
 void b3RecWriteArgs_WorldRebuildStaticTree(b3Recording* rec, b3RecArgs_WorldRebuildStaticTree* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
 }
-// Weld joint
 void b3RecWriteArgs_WorldEnableSpeculative(b3Recording* rec, b3RecArgs_WorldEnableSpeculative* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
     b3RecW_BOOL(&rec.buffer, a.flag);
 }
-// Wheel joint
+// Body
 void b3RecWriteArgs_CreateBody(b3Recording* rec, b3RecArgs_CreateBody* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
     b3RecW_BODYDEF(&rec.buffer, a.def);
 }
-// Wheel joint continued, overflow past the 0xDF range.
 void b3RecWriteArgs_DestroyBody(b3Recording* rec, b3RecArgs_DestroyBody* a) {
     b3RecW_BODYID(&rec.buffer, a.body);
 }
-// Spatial queries. Inputs flow through the manifest (reader side). The hit tail and result are
-// hand-written in recording.c / recording_replay.c since they are variable length.
 void b3RecWriteArgs_BodySetTransform(b3Recording* rec, b3RecArgs_BodySetTransform* a) {
     b3RecW_BODYID(&rec.buffer, a.body);
     b3RecW_POSITION(&rec.buffer, a.position);
     b3RecW_QUAT(&rec.buffer, a.rotation);
 }
-// Identity key (hash of the caller id + label) for the query that immediately follows. Emitted only
-// for a tagged query. The id and label are interned in the trailing tag table, so only the 8 byte key
-// rides the stream.
 void b3RecWriteArgs_BodySetLinearVelocity(b3Recording* rec, b3RecArgs_BodySetLinearVelocity* a) {
     b3RecW_BODYID(&rec.buffer, a.body);
     b3RecW_VEC3(&rec.buffer, a.v);
 }
-// Accumulated world bounds over the whole recording, written once at stop.
 void b3RecWriteArgs_BodySetType(b3Recording* rec, b3RecArgs_BodySetType* a) {
     b3RecW_BODYID(&rec.buffer, a.body);
     b3RecW_I32(&rec.buffer, a.type);
@@ -35566,6 +35637,7 @@ void b3RecWriteArgs_BodyAllowFastRotation(b3Recording* rec, b3RecArgs_BodyAllowF
     b3RecW_BODYID(&rec.buffer, a.body);
     b3RecW_BOOL(&rec.buffer, a.flag);
 }
+// Shape create/destroy
 void b3RecWriteArgs_CreateSphereShape(b3Recording* rec, b3RecArgs_CreateSphereShape* a) {
     b3RecW_BODYID(&rec.buffer, a.body);
     b3RecW_SHAPEDEF(&rec.buffer, a.def);
@@ -35601,6 +35673,7 @@ void b3RecWriteArgs_DestroyShape(b3Recording* rec, b3RecArgs_DestroyShape* a) {
     b3RecW_SHAPEID(&rec.buffer, a.shape);
     b3RecW_BOOL(&rec.buffer, a.updateBodyMass);
 }
+// Shape mutators
 void b3RecWriteArgs_ShapeSetDensity(b3Recording* rec, b3RecArgs_ShapeSetDensity* a) {
     b3RecW_SHAPEID(&rec.buffer, a.shape);
     b3RecW_F32(&rec.buffer, a.density);
@@ -35659,6 +35732,7 @@ void b3RecWriteArgs_ShapeSetName(b3Recording* rec, b3RecArgs_ShapeSetName* a) {
     b3RecW_SHAPEID(&rec.buffer, a.shape);
     b3RecW_STR(&rec.buffer, a.name);
 }
+// Joint create and destroy
 void b3RecWriteArgs_CreateParallelJoint(b3Recording* rec, b3RecArgs_CreateParallelJoint* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
     b3RecW_PARALLELJOINTDEF(&rec.buffer, a.def);
@@ -35699,6 +35773,7 @@ void b3RecWriteArgs_DestroyJoint(b3Recording* rec, b3RecArgs_DestroyJoint* a) {
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_BOOL(&rec.buffer, a.wakeAttached);
 }
+// Generic joint mutators
 void b3RecWriteArgs_JointSetLocalFrameA(b3Recording* rec, b3RecArgs_JointSetLocalFrameA* a) {
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_TRANSFORM(&rec.buffer, a.localFrame);
@@ -35727,6 +35802,7 @@ void b3RecWriteArgs_JointSetTorqueThreshold(b3Recording* rec, b3RecArgs_JointSet
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_F32(&rec.buffer, a.threshold);
 }
+// Parallel joint
 void b3RecWriteArgs_ParallelJointSetSpringHertz(b3Recording* rec, b3RecArgs_ParallelJointSetSpringHertz* a) {
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_F32(&rec.buffer, a.hertz);
@@ -35739,6 +35815,7 @@ void b3RecWriteArgs_ParallelJointSetMaxTorque(b3Recording* rec, b3RecArgs_Parall
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_F32(&rec.buffer, a.maxTorque);
 }
+// Distance joint
 void b3RecWriteArgs_DistanceJointSetLength(b3Recording* rec, b3RecArgs_DistanceJointSetLength* a) {
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_F32(&rec.buffer, a.length);
@@ -35781,6 +35858,7 @@ void b3RecWriteArgs_DistanceJointSetMaxMotorForce(b3Recording* rec, b3RecArgs_Di
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_F32(&rec.buffer, a.force);
 }
+// Motor joint
 void b3RecWriteArgs_MotorJointSetLinearVelocity(b3Recording* rec, b3RecArgs_MotorJointSetLinearVelocity* a) {
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_VEC3(&rec.buffer, a.velocity);
@@ -35821,6 +35899,7 @@ void b3RecWriteArgs_MotorJointSetMaxSpringTorque(b3Recording* rec, b3RecArgs_Mot
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_F32(&rec.buffer, a.maxTorque);
 }
+// Prismatic joint
 void b3RecWriteArgs_PrismaticJointEnableSpring(b3Recording* rec, b3RecArgs_PrismaticJointEnableSpring* a) {
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_BOOL(&rec.buffer, a.enableSpring);
@@ -35858,6 +35937,7 @@ void b3RecWriteArgs_PrismaticJointSetMaxMotorForce(b3Recording* rec, b3RecArgs_P
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_F32(&rec.buffer, a.force);
 }
+// Revolute joint
 void b3RecWriteArgs_RevoluteJointEnableSpring(b3Recording* rec, b3RecArgs_RevoluteJointEnableSpring* a) {
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_BOOL(&rec.buffer, a.enableSpring);
@@ -35895,6 +35975,7 @@ void b3RecWriteArgs_RevoluteJointSetMaxMotorTorque(b3Recording* rec, b3RecArgs_R
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_F32(&rec.buffer, a.torque);
 }
+// Spherical joint
 void b3RecWriteArgs_SphericalJointEnableConeLimit(b3Recording* rec, b3RecArgs_SphericalJointEnableConeLimit* a) {
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_BOOL(&rec.buffer, a.enableLimit);
@@ -35940,6 +36021,7 @@ void b3RecWriteArgs_SphericalJointSetMaxMotorTorque(b3Recording* rec, b3RecArgs_
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_F32(&rec.buffer, a.torque);
 }
+// Weld joint
 void b3RecWriteArgs_WeldJointSetLinearHertz(b3Recording* rec, b3RecArgs_WeldJointSetLinearHertz* a) {
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_F32(&rec.buffer, a.hertz);
@@ -35956,6 +36038,7 @@ void b3RecWriteArgs_WeldJointSetAngularDampingRatio(b3Recording* rec, b3RecArgs_
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_F32(&rec.buffer, a.dampingRatio);
 }
+// Wheel joint
 void b3RecWriteArgs_WheelJointEnableSuspension(b3Recording* rec, b3RecArgs_WheelJointEnableSuspension* a) {
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_BOOL(&rec.buffer, a.flag);
@@ -35985,6 +36068,7 @@ void b3RecWriteArgs_WheelJointSetSpinMotorSpeed(b3Recording* rec, b3RecArgs_Whee
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_F32(&rec.buffer, a.speed);
 }
+// Wheel joint continued, overflow past the 0xDF range.
 void b3RecWriteArgs_WheelJointSetMaxSpinTorque(b3Recording* rec, b3RecArgs_WheelJointSetMaxSpinTorque* a) {
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_F32(&rec.buffer, a.torque);
@@ -36018,6 +36102,8 @@ void b3RecWriteArgs_WheelJointSetTargetSteeringAngle(b3Recording* rec, b3RecArgs
     b3RecW_JOINTID(&rec.buffer, a.joint);
     b3RecW_F32(&rec.buffer, a.radians);
 }
+// Spatial queries. Inputs flow through the manifest (reader side). The hit tail and result are
+// hand-written in recording.c / recording_replay.c since they are variable length.
 void b3RecWriteArgs_QueryOverlapAABB(b3Recording* rec, b3RecArgs_QueryOverlapAABB* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
     b3RecW_AABB(&rec.buffer, a.aabb);
@@ -36061,6 +36147,9 @@ void b3RecWriteArgs_QueryCollideMover(b3Recording* rec, b3RecArgs_QueryCollideMo
     b3RecW_CAPSULE(&rec.buffer, a.mover);
     b3RecW_QUERYFILTER(&rec.buffer, a.filter);
 }
+// Identity key (hash of the caller id + label) for the query that immediately follows. Emitted only
+// for a tagged query. The id and label are interned in the trailing tag table, so only the 8 byte key
+// rides the stream.
 void b3RecWriteArgs_QueryTag(b3Recording* rec, b3RecArgs_QueryTag* a) {
     b3RecW_U64(&rec.buffer, a.key);
 }
@@ -36068,6 +36157,7 @@ void b3RecWriteArgs_StateHash(b3Recording* rec, b3RecArgs_StateHash* a) {
     b3RecW_WORLDID(&rec.buffer, a.world);
     b3RecW_U64(&rec.buffer, a.hash);
 }
+// Accumulated world bounds over the whole recording, written once at stop.
 void b3RecWriteArgs_RecordingBounds(b3Recording* rec, b3RecArgs_RecordingBounds* a) {
     b3RecW_AABB(&rec.buffer, a.bounds);
 }
@@ -36102,7 +36192,6 @@ void b3RecWrite_DestroyWorld(b3Recording* rec, b3RecArgs_DestroyWorld* a) {
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// World config. The world arg is informational; replay always targets its own world.
 void b3RecWrite_Step(b3Recording* rec, b3RecArgs_Step* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 128));
@@ -36110,7 +36199,7 @@ void b3RecWrite_Step(b3Recording* rec, b3RecArgs_Step* a) {
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Body
+// World config. The world arg is informational; replay always targets its own world.
 void b3RecWrite_WorldEnableSleeping(b3Recording* rec, b3RecArgs_WorldEnableSleeping* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 2));
@@ -36118,7 +36207,6 @@ void b3RecWrite_WorldEnableSleeping(b3Recording* rec, b3RecArgs_WorldEnableSleep
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Shape create/destroy
 void b3RecWrite_WorldEnableContinuous(b3Recording* rec, b3RecArgs_WorldEnableContinuous* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 3));
@@ -36126,7 +36214,6 @@ void b3RecWrite_WorldEnableContinuous(b3Recording* rec, b3RecArgs_WorldEnableCon
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Shape mutators
 void b3RecWrite_WorldSetRestitutionThreshold(b3Recording* rec, b3RecArgs_WorldSetRestitutionThreshold* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 4));
@@ -36134,7 +36221,6 @@ void b3RecWrite_WorldSetRestitutionThreshold(b3Recording* rec, b3RecArgs_WorldSe
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Joint create and destroy
 void b3RecWrite_WorldSetHitEventThreshold(b3Recording* rec, b3RecArgs_WorldSetHitEventThreshold* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 5));
@@ -36142,7 +36228,6 @@ void b3RecWrite_WorldSetHitEventThreshold(b3Recording* rec, b3RecArgs_WorldSetHi
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Generic joint mutators
 void b3RecWrite_WorldSetGravity(b3Recording* rec, b3RecArgs_WorldSetGravity* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 6));
@@ -36150,7 +36235,6 @@ void b3RecWrite_WorldSetGravity(b3Recording* rec, b3RecArgs_WorldSetGravity* a) 
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Parallel joint
 void b3RecWrite_WorldExplode(b3Recording* rec, b3RecArgs_WorldExplode* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 7));
@@ -36158,7 +36242,6 @@ void b3RecWrite_WorldExplode(b3Recording* rec, b3RecArgs_WorldExplode* a) {
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Distance joint
 void b3RecWrite_WorldSetContactTuning(b3Recording* rec, b3RecArgs_WorldSetContactTuning* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 8));
@@ -36166,7 +36249,6 @@ void b3RecWrite_WorldSetContactTuning(b3Recording* rec, b3RecArgs_WorldSetContac
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Motor joint
 void b3RecWrite_WorldSetContactRecycleDistance(b3Recording* rec, b3RecArgs_WorldSetContactRecycleDistance* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 9));
@@ -36174,7 +36256,6 @@ void b3RecWrite_WorldSetContactRecycleDistance(b3Recording* rec, b3RecArgs_World
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Prismatic joint
 void b3RecWrite_WorldSetMaximumLinearSpeed(b3Recording* rec, b3RecArgs_WorldSetMaximumLinearSpeed* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 10));
@@ -36182,7 +36263,6 @@ void b3RecWrite_WorldSetMaximumLinearSpeed(b3Recording* rec, b3RecArgs_WorldSetM
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Revolute joint
 void b3RecWrite_WorldEnableWarmStarting(b3Recording* rec, b3RecArgs_WorldEnableWarmStarting* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 11));
@@ -36190,7 +36270,6 @@ void b3RecWrite_WorldEnableWarmStarting(b3Recording* rec, b3RecArgs_WorldEnableW
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Spherical joint
 void b3RecWrite_WorldRebuildStaticTree(b3Recording* rec, b3RecArgs_WorldRebuildStaticTree* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 12));
@@ -36198,7 +36277,6 @@ void b3RecWrite_WorldRebuildStaticTree(b3Recording* rec, b3RecArgs_WorldRebuildS
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Weld joint
 void b3RecWrite_WorldEnableSpeculative(b3Recording* rec, b3RecArgs_WorldEnableSpeculative* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 13));
@@ -36206,7 +36284,7 @@ void b3RecWrite_WorldEnableSpeculative(b3Recording* rec, b3RecArgs_WorldEnableSp
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Wheel joint
+// Body
 void b3RecWrite_CreateBody(b3Recording* rec, b3RecArgs_CreateBody* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 16));
@@ -36214,7 +36292,6 @@ void b3RecWrite_CreateBody(b3Recording* rec, b3RecArgs_CreateBody* a) {
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Wheel joint continued, overflow past the 0xDF range.
 void b3RecWrite_DestroyBody(b3Recording* rec, b3RecArgs_DestroyBody* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 17));
@@ -36222,8 +36299,6 @@ void b3RecWrite_DestroyBody(b3Recording* rec, b3RecArgs_DestroyBody* a) {
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Spatial queries. Inputs flow through the manifest (reader side). The hit tail and result are
-// hand-written in recording.c / recording_replay.c since they are variable length.
 void b3RecWrite_BodySetTransform(b3Recording* rec, b3RecArgs_BodySetTransform* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 32));
@@ -36231,9 +36306,6 @@ void b3RecWrite_BodySetTransform(b3Recording* rec, b3RecArgs_BodySetTransform* a
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Identity key (hash of the caller id + label) for the query that immediately follows. Emitted only
-// for a tagged query. The id and label are interned in the trailing tag table, so only the 8 byte key
-// rides the stream.
 void b3RecWrite_BodySetLinearVelocity(b3Recording* rec, b3RecArgs_BodySetLinearVelocity* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 33));
@@ -36241,7 +36313,6 @@ void b3RecWrite_BodySetLinearVelocity(b3Recording* rec, b3RecArgs_BodySetLinearV
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Accumulated world bounds over the whole recording, written once at stop.
 void b3RecWrite_BodySetType(b3Recording* rec, b3RecArgs_BodySetType* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 34));
@@ -36417,6 +36488,7 @@ void b3RecWrite_BodyAllowFastRotation(b3Recording* rec, b3RecArgs_BodyAllowFastR
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Shape create/destroy
 void b3RecWrite_CreateSphereShape(b3Recording* rec, b3RecArgs_CreateSphereShape* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 64));
@@ -36466,6 +36538,7 @@ void b3RecWrite_DestroyShape(b3Recording* rec, b3RecArgs_DestroyShape* a) {
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Shape mutators
 void b3RecWrite_ShapeSetDensity(b3Recording* rec, b3RecArgs_ShapeSetDensity* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 80));
@@ -36557,6 +36630,7 @@ void b3RecWrite_ShapeSetName(b3Recording* rec, b3RecArgs_ShapeSetName* a) {
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Joint create and destroy
 void b3RecWrite_CreateParallelJoint(b3Recording* rec, b3RecArgs_CreateParallelJoint* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 144));
@@ -36627,6 +36701,7 @@ void b3RecWrite_DestroyJoint(b3Recording* rec, b3RecArgs_DestroyJoint* a) {
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Generic joint mutators
 void b3RecWrite_JointSetLocalFrameA(b3Recording* rec, b3RecArgs_JointSetLocalFrameA* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 154));
@@ -36676,6 +36751,7 @@ void b3RecWrite_JointSetTorqueThreshold(b3Recording* rec, b3RecArgs_JointSetTorq
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Parallel joint
 void b3RecWrite_ParallelJointSetSpringHertz(b3Recording* rec, b3RecArgs_ParallelJointSetSpringHertz* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 161));
@@ -36697,6 +36773,7 @@ void b3RecWrite_ParallelJointSetMaxTorque(b3Recording* rec, b3RecArgs_ParallelJo
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Distance joint
 void b3RecWrite_DistanceJointSetLength(b3Recording* rec, b3RecArgs_DistanceJointSetLength* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 164));
@@ -36767,6 +36844,7 @@ void b3RecWrite_DistanceJointSetMaxMotorForce(b3Recording* rec, b3RecArgs_Distan
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Motor joint
 void b3RecWrite_MotorJointSetLinearVelocity(b3Recording* rec, b3RecArgs_MotorJointSetLinearVelocity* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 174));
@@ -36837,6 +36915,7 @@ void b3RecWrite_MotorJointSetMaxSpringTorque(b3Recording* rec, b3RecArgs_MotorJo
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Prismatic joint
 void b3RecWrite_PrismaticJointEnableSpring(b3Recording* rec, b3RecArgs_PrismaticJointEnableSpring* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 184));
@@ -36900,6 +36979,7 @@ void b3RecWrite_PrismaticJointSetMaxMotorForce(b3Recording* rec, b3RecArgs_Prism
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Revolute joint
 void b3RecWrite_RevoluteJointEnableSpring(b3Recording* rec, b3RecArgs_RevoluteJointEnableSpring* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 193));
@@ -36963,6 +37043,7 @@ void b3RecWrite_RevoluteJointSetMaxMotorTorque(b3Recording* rec, b3RecArgs_Revol
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Spherical joint
 void b3RecWrite_SphericalJointEnableConeLimit(b3Recording* rec, b3RecArgs_SphericalJointEnableConeLimit* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 202));
@@ -37040,6 +37121,7 @@ void b3RecWrite_SphericalJointSetMaxMotorTorque(b3Recording* rec, b3RecArgs_Sphe
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Weld joint
 void b3RecWrite_WeldJointSetLinearHertz(b3Recording* rec, b3RecArgs_WeldJointSetLinearHertz* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 213));
@@ -37068,6 +37150,7 @@ void b3RecWrite_WeldJointSetAngularDampingRatio(b3Recording* rec, b3RecArgs_Weld
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Wheel joint
 void b3RecWrite_WheelJointEnableSuspension(b3Recording* rec, b3RecArgs_WheelJointEnableSuspension* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 217));
@@ -37117,6 +37200,7 @@ void b3RecWrite_WheelJointSetSpinMotorSpeed(b3Recording* rec, b3RecArgs_WheelJoi
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Wheel joint continued, overflow past the 0xDF range.
 void b3RecWrite_WheelJointSetMaxSpinTorque(b3Recording* rec, b3RecArgs_WheelJointSetMaxSpinTorque* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 224));
@@ -37173,6 +37257,8 @@ void b3RecWrite_WheelJointSetTargetSteeringAngle(b3Recording* rec, b3RecArgs_Whe
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Spatial queries. Inputs flow through the manifest (reader side). The hit tail and result are
+// hand-written in recording.c / recording_replay.c since they are variable length.
 void b3RecWrite_QueryOverlapAABB(b3Recording* rec, b3RecArgs_QueryOverlapAABB* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 232));
@@ -37222,6 +37308,9 @@ void b3RecWrite_QueryCollideMover(b3Recording* rec, b3RecArgs_QueryCollideMover*
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Identity key (hash of the caller id + label) for the query that immediately follows. Emitted only
+// for a tagged query. The id and label are interned in the trailing tag table, so only the 8 byte key
+// rides the stream.
 void b3RecWrite_QueryTag(b3Recording* rec, b3RecArgs_QueryTag* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 239));
@@ -37236,6 +37325,7 @@ void b3RecWrite_StateHash(b3Recording* rec, b3RecArgs_StateHash* a) {
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Accumulated world bounds over the whole recording, written once at stop.
 void b3RecWrite_RecordingBounds(b3Recording* rec, b3RecArgs_RecordingBounds* a) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 242));
@@ -37284,8 +37374,6 @@ void b3RecWriteRet_CreateSphereShape(b3Recording* rec, b3RecArgs_CreateSphereSha
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
-// Shape mutators
-// Joint create and destroy
 void b3RecWriteRet_CreateCapsuleShape(b3Recording* rec, b3RecArgs_CreateCapsuleShape* a, b3ShapeId id) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 65));
@@ -37326,6 +37414,8 @@ void b3RecWriteRet_CreateCompoundShape(b3Recording* rec, b3RecArgs_CreateCompoun
     b3RecEndRecord(rec);
     b3UnlockMutex(rec.lock);
 }
+// Shape mutators
+// Joint create and destroy
 void b3RecWriteRet_CreateParallelJoint(b3Recording* rec, b3RecArgs_CreateParallelJoint* a, b3JointId id) {
     b3LockMutex(rec.lock);
     b3RecBeginRecord(rec, cast(u8, 144));
@@ -38127,6 +38217,10 @@ bool b3GeometryHashMap_rehash(b3GeometryHashMap* table, u64 bucket_count) {
         return true;
     }
 }
+// Inserts a key, replacing the existing key if it already exists.
+// This function wraps insert_raw in a loop that handles growing and rehashing the table if a new key cannot be inserted
+// because of the maximum load factor or displacement limit constraints.
+// Returns an iterator to the inserted key, or an end iterator in the case of allocation failure.
 b3GeometryHashMap_itr b3GeometryHashMap_insert(b3GeometryHashMap* table, u64 key, u32 val) {
     while true {
         b3GeometryHashMap_itr itr = b3GeometryHashMap_insert_raw(table, key, &val, false, true);
@@ -38135,6 +38229,8 @@ b3GeometryHashMap_itr b3GeometryHashMap_insert(b3GeometryHashMap* table, u64 key
         }
     }
 }
+// Same as NAME_insert, except that if the key already exists, no insertion occurs and the function returns an iterator
+// to the existing key.
 b3GeometryHashMap_itr b3GeometryHashMap_get_or_insert(b3GeometryHashMap* table, u64 key, u32 val) {
     while true {
         b3GeometryHashMap_itr itr = b3GeometryHashMap_insert_raw(table, key, &val, false, false);
@@ -38143,6 +38239,7 @@ b3GeometryHashMap_itr b3GeometryHashMap_get_or_insert(b3GeometryHashMap* table, 
         }
     }
 }
+// Returns an iterator pointing to the specified key, or an end iterator if the key does not exist.
 b3GeometryHashMap_itr b3GeometryHashMap_get(b3GeometryHashMap* table, u64 key) {
     u64 hash = vt_hash_integer(key);
     u64 home_bucket = hash & table.buckets_mask;
@@ -38163,6 +38260,15 @@ b3GeometryHashMap_itr b3GeometryHashMap_get(b3GeometryHashMap* table, u64 key) {
         bucket = home_bucket + vt_quadratic(displacement) & table.buckets_mask;
     }
 }
+// Erases the key pointed to by the specified iterator.
+// The erasure always occurs at the end of the chain to which the key belongs.
+// If the key to be erased is not the last in the chain, it is swapped with the last so that erasure occurs at the end.
+// This helps keep a chain's keys close to their home bucket for the sake of cache locality.
+// Returns true if, in the case of iteration from first to end, NAME_next should now be called on the iterator to find
+// the next key.
+// This return value is necessary because at the iterator location, the erasure could result in an empty bucket, a
+// bucket containing a moved key already visited during the iteration, or a bucket containing a moved key not yet
+// visited.
 bool b3GeometryHashMap_erase_itr_raw(b3GeometryHashMap* table, b3GeometryHashMap_itr itr) {
     --table.key_count;
     var itr_bucket = cast(u64, cast(i64, itr.metadatum - table.metadata));
@@ -38206,6 +38312,8 @@ bool b3GeometryHashMap_erase_itr_raw(b3GeometryHashMap* table, b3GeometryHashMap
         }
     }
 }
+// Erases the specified key, if it exists.
+// Returns true if a key was erased.
 bool b3GeometryHashMap_erase(b3GeometryHashMap* table, u64 key) {
     b3GeometryHashMap_itr itr = b3GeometryHashMap_get(table, key);
     if b3GeometryHashMap_is_end(itr) != 0 {
@@ -38988,6 +39096,10 @@ bool b3RecTagMap_rehash(b3RecTagMap* table, u64 bucket_count) {
         return true;
     }
 }
+// Inserts a key, replacing the existing key if it already exists.
+// This function wraps insert_raw in a loop that handles growing and rehashing the table if a new key cannot be inserted
+// because of the maximum load factor or displacement limit constraints.
+// Returns an iterator to the inserted key, or an end iterator in the case of allocation failure.
 b3RecTagMap_itr b3RecTagMap_insert(b3RecTagMap* table, u64 key, u32 val) {
     while true {
         b3RecTagMap_itr itr = b3RecTagMap_insert_raw(table, key, &val, false, true);
@@ -38996,6 +39108,8 @@ b3RecTagMap_itr b3RecTagMap_insert(b3RecTagMap* table, u64 key, u32 val) {
         }
     }
 }
+// Same as NAME_insert, except that if the key already exists, no insertion occurs and the function returns an iterator
+// to the existing key.
 b3RecTagMap_itr b3RecTagMap_get_or_insert(b3RecTagMap* table, u64 key, u32 val) {
     while true {
         b3RecTagMap_itr itr = b3RecTagMap_insert_raw(table, key, &val, false, false);
@@ -39004,6 +39118,7 @@ b3RecTagMap_itr b3RecTagMap_get_or_insert(b3RecTagMap* table, u64 key, u32 val) 
         }
     }
 }
+// Returns an iterator pointing to the specified key, or an end iterator if the key does not exist.
 b3RecTagMap_itr b3RecTagMap_get(b3RecTagMap* table, u64 key) {
     u64 hash = vt_hash_integer(key);
     u64 home_bucket = hash & table.buckets_mask;
@@ -39024,6 +39139,15 @@ b3RecTagMap_itr b3RecTagMap_get(b3RecTagMap* table, u64 key) {
         bucket = home_bucket + vt_quadratic(displacement) & table.buckets_mask;
     }
 }
+// Erases the key pointed to by the specified iterator.
+// The erasure always occurs at the end of the chain to which the key belongs.
+// If the key to be erased is not the last in the chain, it is swapped with the last so that erasure occurs at the end.
+// This helps keep a chain's keys close to their home bucket for the sake of cache locality.
+// Returns true if, in the case of iteration from first to end, NAME_next should now be called on the iterator to find
+// the next key.
+// This return value is necessary because at the iterator location, the erasure could result in an empty bucket, a
+// bucket containing a moved key already visited during the iteration, or a bucket containing a moved key not yet
+// visited.
 bool b3RecTagMap_erase_itr_raw(b3RecTagMap* table, b3RecTagMap_itr itr) {
     --table.key_count;
     var itr_bucket = cast(u64, cast(i64, itr.metadatum - table.metadata));
@@ -39067,6 +39191,8 @@ bool b3RecTagMap_erase_itr_raw(b3RecTagMap* table, b3RecTagMap_itr itr) {
         }
     }
 }
+// Erases the specified key, if it exists.
+// Returns true if a key was erased.
 bool b3RecTagMap_erase(b3RecTagMap* table, u64 key) {
     b3RecTagMap_itr itr = b3RecTagMap_get(table, key);
     if b3RecTagMap_is_end(itr) != 0 {
@@ -43617,6 +43743,10 @@ bool b3RecTagLookup_rehash(b3RecTagLookup* table, u64 bucket_count) {
         return true;
     }
 }
+// Inserts a key, replacing the existing key if it already exists.
+// This function wraps insert_raw in a loop that handles growing and rehashing the table if a new key cannot be inserted
+// because of the maximum load factor or displacement limit constraints.
+// Returns an iterator to the inserted key, or an end iterator in the case of allocation failure.
 b3RecTagLookup_itr b3RecTagLookup_insert(b3RecTagLookup* table, u64 key, u32 val) {
     while true {
         b3RecTagLookup_itr itr = b3RecTagLookup_insert_raw(table, key, &val, false, true);
@@ -43625,6 +43755,8 @@ b3RecTagLookup_itr b3RecTagLookup_insert(b3RecTagLookup* table, u64 key, u32 val
         }
     }
 }
+// Same as NAME_insert, except that if the key already exists, no insertion occurs and the function returns an iterator
+// to the existing key.
 b3RecTagLookup_itr b3RecTagLookup_get_or_insert(b3RecTagLookup* table, u64 key, u32 val) {
     while true {
         b3RecTagLookup_itr itr = b3RecTagLookup_insert_raw(table, key, &val, false, false);
@@ -43633,6 +43765,7 @@ b3RecTagLookup_itr b3RecTagLookup_get_or_insert(b3RecTagLookup* table, u64 key, 
         }
     }
 }
+// Returns an iterator pointing to the specified key, or an end iterator if the key does not exist.
 b3RecTagLookup_itr b3RecTagLookup_get(b3RecTagLookup* table, u64 key) {
     u64 hash = vt_hash_integer(key);
     u64 home_bucket = hash & table.buckets_mask;
@@ -43653,6 +43786,15 @@ b3RecTagLookup_itr b3RecTagLookup_get(b3RecTagLookup* table, u64 key) {
         bucket = home_bucket + vt_quadratic(displacement) & table.buckets_mask;
     }
 }
+// Erases the key pointed to by the specified iterator.
+// The erasure always occurs at the end of the chain to which the key belongs.
+// If the key to be erased is not the last in the chain, it is swapped with the last so that erasure occurs at the end.
+// This helps keep a chain's keys close to their home bucket for the sake of cache locality.
+// Returns true if, in the case of iteration from first to end, NAME_next should now be called on the iterator to find
+// the next key.
+// This return value is necessary because at the iterator location, the erasure could result in an empty bucket, a
+// bucket containing a moved key already visited during the iteration, or a bucket containing a moved key not yet
+// visited.
 bool b3RecTagLookup_erase_itr_raw(b3RecTagLookup* table, b3RecTagLookup_itr itr) {
     --table.key_count;
     var itr_bucket = cast(u64, cast(i64, itr.metadatum - table.metadata));
@@ -43696,6 +43838,8 @@ bool b3RecTagLookup_erase_itr_raw(b3RecTagLookup* table, b3RecTagLookup_itr itr)
         }
     }
 }
+// Erases the specified key, if it exists.
+// Returns true if a key was erased.
 bool b3RecTagLookup_erase(b3RecTagLookup* table, u64 key) {
     b3RecTagLookup_itr itr = b3RecTagLookup_get(table, key);
     if b3RecTagLookup_is_end(itr) != 0 {

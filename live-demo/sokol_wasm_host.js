@@ -112,7 +112,9 @@ const readCStr = (ptr) => {
     const start = Number(ptr);
     let end = start;
     while (u8[end] !== 0 && end - start < 4096) end++;
-    return new TextDecoder().decode(u8.subarray(start, end));
+    // slice, not subarray: TextDecoder rejects SharedArrayBuffer-backed
+    // views (--threads builds; Safari is the only engine that allows them).
+    return new TextDecoder().decode(u8.slice(start, end));
 };
 
 // Natural extern ABI: i32/f32/f64/pointer args and returns cross as
@@ -150,6 +152,18 @@ SOKOL.stop = function() {
     SOKOL.instance = null;
 };
 
+// A frame exception stops the loop; without this it died in the console
+// and the page just looked frozen. Surface it: onLog for embedders, and
+// a window ErrorEvent so plain pages' error overlays fire.
+function reportFrameError(e) {
+    console.error('frame error:', e);
+    quitRequested = true;
+    const m = 'frame error: ' + ((e && e.message) || e);
+    try { SOKOL.onLog(m + '\n', true); } catch (_) {}
+    try { window.dispatchEvent(new ErrorEvent('error', { message: m, error: e })); } catch (_) {}
+    fireQuit();
+}
+
 function rafLoop(time) {
     if (quitRequested || glLost) { fireQuit(); return; }
     if (!instance) return;
@@ -171,9 +185,7 @@ function rafLoop(time) {
             instance.exports._sapp_wasm_frame(time || 0);
         }
     } catch (e) {
-        console.error('frame error:', e);
-        quitRequested = true;
-        fireQuit();
+        reportFrameError(e);
         return;
     }
     frameCount++;

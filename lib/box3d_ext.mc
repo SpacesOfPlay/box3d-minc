@@ -397,23 +397,33 @@ struct b3Thread {
 
 // --- timing ---------------------------------------------------------
 // qpc/qpf give a monotonic clock (nanosecond ticks + frequency).
+//
+f64 b3_invFrequency;
+
+private f64 b3_inv_freq() {
+    // cache the timer frequency
+    if b3_invFrequency == 0.0 {
+        i64 freq = qpf();
+        if freq == 0 { return 0.0; }
+        b3_invFrequency = 1000.0 / cast(f64, freq);
+    }
+    return b3_invFrequency;
+}
 
 u64 b3GetTicks() {
     return cast(u64, qpc());
 }
 
 f32 b3GetMilliseconds(u64 ticks) {
-    i64 freq = qpf();
-    if freq == 0 { return 0.0f; }
+    f64 inv = b3_inv_freq();
     u64 now = cast(u64, qpc());
-    return cast(f32, 1000.0 * cast(f64, now - ticks) / cast(f64, freq));
+    return cast(f32, inv * cast(f64, now - ticks));
 }
 
 f32 b3GetMillisecondsAndReset(u64* ticks) {
-    i64 freq = qpf();
+    f64 inv = b3_inv_freq();
     u64 now = cast(u64, qpc());
-    if freq == 0 { *ticks = now; return 0.0f; }
-    f32 ms = cast(f32, 1000.0 * cast(f64, now - *ticks) / cast(f64, freq));
+    f32 ms = cast(f32, inv * cast(f64, now - *ticks));
     *ticks = now;
     return ms;
 }

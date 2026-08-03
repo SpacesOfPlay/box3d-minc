@@ -14553,19 +14553,14 @@ void b3ScatterBodies(b3BodyState* states, i32* indices, b3BodyStateW* simdBody) 
         s.angularVelocity = w;
     }
 }
-}
 // Prepare convex contact constraints
-when defined(B3_PREPARE_INTERLEAVED_GATHER) {
 // transminc-local perf reshape (not upstream): interleaved wide gather.
-// Opt-in via -D B3_PREPARE_INTERLEAVED_GATHER (the wide manifests);
-// plain C builds and the scalar arm keep the upstream form. Raw-SSE2
-// intrinsic macros, not the b3*W helpers: transminc lowers intrinsics
-// to native float4 operators, which minc's packed-FMA fusion needs
-// (helper-call chains measured ~2x slower through the transpiler).
-// Verified value-equivalent by scripts/box3d_wide_bench.ps1 verify.
-private { b3Manifold b3_zeroManifold; }
-private { b3Contact b3_zeroContact; }
-private { b3BodyState b3_zeroBodyState; }
+// Raw-SSE2 intrinsic macros, not the b3*W helpers: transminc lowers 
+// intrinsics to native float4 operators, which minc's packed-FMA fusion needs.
+// Verified value-equivalent.
+b3Manifold b3_zeroManifold;
+b3Contact b3_zeroContact;
+b3BodyState b3_zeroBodyState;
 }
 void b3PrepareContacts_Convex(b3SolverBlock block, b3StepContext* context) {
     b3World* world = context.world;
@@ -14591,186 +14586,622 @@ void b3PrepareContacts_Convex(b3SolverBlock block, b3StepContext* context) {
         for ; wideIndex < colorWideEndIndex; ++wideIndex {
             b3ContactConstraintWide* constraint = wideBase + wideIndex;
             i32 localWideIndex = wideIndex - colorWideStart;
-            for i32 lane = 0; lane < 4; ++lane {
-                i32 contactIndex = 4 * localWideIndex + lane;
-                if contactIndex >= colorContactCount {
-                    break;
-                }
-                i32 contactId = contactIds[contactIndex];
+            b3Contact* contact0 = &b3_zeroContact;
+            b3Manifold* manifold0 = &b3_zeroManifold;
+            i32 indexA0 = -1;
+            i32 indexB0 = -1;
+            i32 active0 = 0;
+            if 4 * localWideIndex + 0 < colorContactCount {
                 ignore 0;
-                b3Contact* contact = world.contacts.data + contactId;
+                contact0 = world.contacts.data + contactIds[4 * localWideIndex + 0];
                 ignore 0;
-                b3Manifold* manifold = contact.manifolds + 0;
-                i32 indexA = contact.bodySimIndexA;
-                i32 indexB = contact.bodySimIndexB;
-                constraint.indexA[lane] = indexA + 1;
-                constraint.indexB[lane] = indexB + 1;
-                constraint.manifolds[lane] = manifold;
-                f32 mA;
-                noinit b3Matrix3 iA;
-                noinit b3Vec3 vA;
-                noinit b3Vec3 wA;
-                if indexA == -1 {
-                    mA = 0.0f;
-                    iA = b3Mat3_zero;
-                    vA = b3Vec3_zero;
-                    wA = b3Vec3_zero;
-                } else {
-                    b3BodySim* simA = sims + indexA;
-                    mA = simA.invMass;
-                    iA = simA.invInertiaWorld;
-                    b3BodyState* stateA = states + indexA;
-                    vA = stateA.linearVelocity;
-                    wA = stateA.angularVelocity;
+                manifold0 = contact0.manifolds + 0;
+                indexA0 = contact0.bodySimIndexA;
+                indexB0 = contact0.bodySimIndexB;
+                active0 = 1;
+            }
+            b3Contact* contact1 = &b3_zeroContact;
+            b3Manifold* manifold1 = &b3_zeroManifold;
+            i32 indexA1 = -1;
+            i32 indexB1 = -1;
+            i32 active1 = 0;
+            if 4 * localWideIndex + 1 < colorContactCount {
+                ignore 0;
+                contact1 = world.contacts.data + contactIds[4 * localWideIndex + 1];
+                ignore 0;
+                manifold1 = contact1.manifolds + 0;
+                indexA1 = contact1.bodySimIndexA;
+                indexB1 = contact1.bodySimIndexB;
+                active1 = 1;
+            }
+            b3Contact* contact2 = &b3_zeroContact;
+            b3Manifold* manifold2 = &b3_zeroManifold;
+            i32 indexA2 = -1;
+            i32 indexB2 = -1;
+            i32 active2 = 0;
+            if 4 * localWideIndex + 2 < colorContactCount {
+                ignore 0;
+                contact2 = world.contacts.data + contactIds[4 * localWideIndex + 2];
+                ignore 0;
+                manifold2 = contact2.manifolds + 0;
+                indexA2 = contact2.bodySimIndexA;
+                indexB2 = contact2.bodySimIndexB;
+                active2 = 1;
+            }
+            b3Contact* contact3 = &b3_zeroContact;
+            b3Manifold* manifold3 = &b3_zeroManifold;
+            i32 indexA3 = -1;
+            i32 indexB3 = -1;
+            i32 active3 = 0;
+            if 4 * localWideIndex + 3 < colorContactCount {
+                ignore 0;
+                contact3 = world.contacts.data + contactIds[4 * localWideIndex + 3];
+                ignore 0;
+                manifold3 = contact3.manifolds + 0;
+                indexA3 = contact3.bodySimIndexA;
+                indexB3 = contact3.bodySimIndexB;
+                active3 = 1;
+            }
+            if active0 != 0 {
+                constraint.indexA[0] = indexA0 + 1;
+                constraint.indexB[0] = indexB0 + 1;
+                constraint.manifolds[0] = manifold0;
+                constraint.pointCounts[0] = manifold0.pointCount;
+            }
+            if active1 != 0 {
+                constraint.indexA[1] = indexA1 + 1;
+                constraint.indexB[1] = indexB1 + 1;
+                constraint.manifolds[1] = manifold1;
+                constraint.pointCounts[1] = manifold1.pointCount;
+            }
+            if active2 != 0 {
+                constraint.indexA[2] = indexA2 + 1;
+                constraint.indexB[2] = indexB2 + 1;
+                constraint.manifolds[2] = manifold2;
+                constraint.pointCounts[2] = manifold2.pointCount;
+            }
+            if active3 != 0 {
+                constraint.indexA[3] = indexA3 + 1;
+                constraint.indexB[3] = indexB3 + 1;
+                constraint.manifolds[3] = manifold3;
+                constraint.pointCounts[3] = manifold3.pointCount;
+            }
+            f32 massA0 = 0.0f;
+            if indexA0 != -1 {
+                massA0 = (sims + indexA0).invMass;
+            }
+            f32 massA1 = 0.0f;
+            if indexA1 != -1 {
+                massA1 = (sims + indexA1).invMass;
+            }
+            f32 massA2 = 0.0f;
+            if indexA2 != -1 {
+                massA2 = (sims + indexA2).invMass;
+            }
+            f32 massA3 = 0.0f;
+            if indexA3 != -1 {
+                massA3 = (sims + indexA3).invMass;
+            }
+            constraint.invMassA = float4{massA0, massA1, massA2, massA3};
+            f32 massB0 = 0.0f;
+            if indexB0 != -1 {
+                massB0 = (sims + indexB0).invMass;
+            }
+            f32 massB1 = 0.0f;
+            if indexB1 != -1 {
+                massB1 = (sims + indexB1).invMass;
+            }
+            f32 massB2 = 0.0f;
+            if indexB2 != -1 {
+                massB2 = (sims + indexB2).invMass;
+            }
+            f32 massB3 = 0.0f;
+            if indexB3 != -1 {
+                massB3 = (sims + indexB3).invMass;
+            }
+            constraint.invMassB = float4{massB0, massB1, massB2, massB3};
+            constraint.normal.X = float4{manifold0.normal.x, manifold1.normal.x, manifold2.normal.x, manifold3.normal.x};
+            constraint.normal.Y = float4{manifold0.normal.y, manifold1.normal.y, manifold2.normal.y, manifold3.normal.y};
+            constraint.normal.Z = float4{manifold0.normal.z, manifold1.normal.z, manifold2.normal.z, manifold3.normal.z};
+            b3Vec3 tangent1_0 = b3Vec3_zero;
+            if active0 != 0 {
+                tangent1_0 = b3Perp(manifold0.normal);
+            }
+            b3Vec3 tangent1_1 = b3Vec3_zero;
+            if active1 != 0 {
+                tangent1_1 = b3Perp(manifold1.normal);
+            }
+            b3Vec3 tangent1_2 = b3Vec3_zero;
+            if active2 != 0 {
+                tangent1_2 = b3Perp(manifold2.normal);
+            }
+            b3Vec3 tangent1_3 = b3Vec3_zero;
+            if active3 != 0 {
+                tangent1_3 = b3Perp(manifold3.normal);
+            }
+            constraint.tangent1.X = float4{tangent1_0.x, tangent1_1.x, tangent1_2.x, tangent1_3.x};
+            constraint.tangent1.Y = float4{tangent1_0.y, tangent1_1.y, tangent1_2.y, tangent1_3.y};
+            constraint.tangent1.Z = float4{tangent1_0.z, tangent1_1.z, tangent1_2.z, tangent1_3.z};
+            f32 tangentVel1_0 = 0.0f;
+            if active0 != 0 {
+                tangentVel1_0 = b3Dot(contact0.tangentVelocity, tangent1_0);
+            }
+            f32 tangentVel1_1 = 0.0f;
+            if active1 != 0 {
+                tangentVel1_1 = b3Dot(contact1.tangentVelocity, tangent1_1);
+            }
+            f32 tangentVel1_2 = 0.0f;
+            if active2 != 0 {
+                tangentVel1_2 = b3Dot(contact2.tangentVelocity, tangent1_2);
+            }
+            f32 tangentVel1_3 = 0.0f;
+            if active3 != 0 {
+                tangentVel1_3 = b3Dot(contact3.tangentVelocity, tangent1_3);
+            }
+            constraint.tangentVelocity1 = float4{tangentVel1_0, tangentVel1_1, tangentVel1_2, tangentVel1_3};
+            b3Vec3 tangent2_0 = b3Vec3_zero;
+            if active0 != 0 {
+                tangent2_0 = b3Cross(tangent1_0, manifold0.normal);
+            }
+            b3Vec3 tangent2_1 = b3Vec3_zero;
+            if active1 != 0 {
+                tangent2_1 = b3Cross(tangent1_1, manifold1.normal);
+            }
+            b3Vec3 tangent2_2 = b3Vec3_zero;
+            if active2 != 0 {
+                tangent2_2 = b3Cross(tangent1_2, manifold2.normal);
+            }
+            b3Vec3 tangent2_3 = b3Vec3_zero;
+            if active3 != 0 {
+                tangent2_3 = b3Cross(tangent1_3, manifold3.normal);
+            }
+            constraint.tangent2.X = float4{tangent2_0.x, tangent2_1.x, tangent2_2.x, tangent2_3.x};
+            constraint.tangent2.Y = float4{tangent2_0.y, tangent2_1.y, tangent2_2.y, tangent2_3.y};
+            constraint.tangent2.Z = float4{tangent2_0.z, tangent2_1.z, tangent2_2.z, tangent2_3.z};
+            f32 tangentVel2_0 = 0.0f;
+            if active0 != 0 {
+                tangentVel2_0 = b3Dot(contact0.tangentVelocity, tangent2_0);
+            }
+            f32 tangentVel2_1 = 0.0f;
+            if active1 != 0 {
+                tangentVel2_1 = b3Dot(contact1.tangentVelocity, tangent2_1);
+            }
+            f32 tangentVel2_2 = 0.0f;
+            if active2 != 0 {
+                tangentVel2_2 = b3Dot(contact2.tangentVelocity, tangent2_2);
+            }
+            f32 tangentVel2_3 = 0.0f;
+            if active3 != 0 {
+                tangentVel2_3 = b3Dot(contact3.tangentVelocity, tangent2_3);
+            }
+            constraint.tangentVelocity2 = float4{tangentVel2_0, tangentVel2_1, tangentVel2_2, tangentVel2_3};
+            constraint.friction = float4{contact0.friction, contact1.friction, contact2.friction, contact3.friction};
+            constraint.restitution = float4{contact0.restitution, contact1.restitution, contact2.restitution, contact3.restitution};
+            constraint.rollingResistance = float4{contact0.rollingResistance, contact1.rollingResistance, contact2.rollingResistance, contact3.rollingResistance};
+            f32 biasRate0 = 0.0f;
+            f32 massScale0 = 0.0f;
+            f32 impulseScale0 = 0.0f;
+            if active0 != 0 {
+                b3Softness soft0 = indexA0 == -1 || indexB0 == -1 ? staticSoftness : contactSoftness;
+                biasRate0 = soft0.biasRate;
+                massScale0 = soft0.massScale;
+                impulseScale0 = soft0.impulseScale;
+            }
+            f32 biasRate1 = 0.0f;
+            f32 massScale1 = 0.0f;
+            f32 impulseScale1 = 0.0f;
+            if active1 != 0 {
+                b3Softness soft1 = indexA1 == -1 || indexB1 == -1 ? staticSoftness : contactSoftness;
+                biasRate1 = soft1.biasRate;
+                massScale1 = soft1.massScale;
+                impulseScale1 = soft1.impulseScale;
+            }
+            f32 biasRate2 = 0.0f;
+            f32 massScale2 = 0.0f;
+            f32 impulseScale2 = 0.0f;
+            if active2 != 0 {
+                b3Softness soft2 = indexA2 == -1 || indexB2 == -1 ? staticSoftness : contactSoftness;
+                biasRate2 = soft2.biasRate;
+                massScale2 = soft2.massScale;
+                impulseScale2 = soft2.impulseScale;
+            }
+            f32 biasRate3 = 0.0f;
+            f32 massScale3 = 0.0f;
+            f32 impulseScale3 = 0.0f;
+            if active3 != 0 {
+                b3Softness soft3 = indexA3 == -1 || indexB3 == -1 ? staticSoftness : contactSoftness;
+                biasRate3 = soft3.biasRate;
+                massScale3 = soft3.massScale;
+                impulseScale3 = soft3.impulseScale;
+            }
+            constraint.biasRate = float4{biasRate0, biasRate1, biasRate2, biasRate3};
+            constraint.massScale = float4{massScale0, massScale1, massScale2, massScale3};
+            constraint.impulseScale = float4{impulseScale0, impulseScale1, impulseScale2, impulseScale3};
+            b3Matrix3* invIA0 = &b3Mat3_zero;
+            if indexA0 != -1 {
+                invIA0 = &(sims + indexA0).invInertiaWorld;
+            }
+            b3Matrix3* invIB0 = &b3Mat3_zero;
+            if indexB0 != -1 {
+                invIB0 = &(sims + indexB0).invInertiaWorld;
+            }
+            b3Matrix3* invIA1 = &b3Mat3_zero;
+            if indexA1 != -1 {
+                invIA1 = &(sims + indexA1).invInertiaWorld;
+            }
+            b3Matrix3* invIB1 = &b3Mat3_zero;
+            if indexB1 != -1 {
+                invIB1 = &(sims + indexB1).invInertiaWorld;
+            }
+            b3Matrix3* invIA2 = &b3Mat3_zero;
+            if indexA2 != -1 {
+                invIA2 = &(sims + indexA2).invInertiaWorld;
+            }
+            b3Matrix3* invIB2 = &b3Mat3_zero;
+            if indexB2 != -1 {
+                invIB2 = &(sims + indexB2).invInertiaWorld;
+            }
+            b3Matrix3* invIA3 = &b3Mat3_zero;
+            if indexA3 != -1 {
+                invIA3 = &(sims + indexA3).invInertiaWorld;
+            }
+            b3Matrix3* invIB3 = &b3Mat3_zero;
+            if indexB3 != -1 {
+                invIB3 = &(sims + indexB3).invInertiaWorld;
+            }
+            constraint.invIA.cxx = float4{invIA0.cx.x, invIA1.cx.x, invIA2.cx.x, invIA3.cx.x};
+            constraint.invIA.cxy = float4{invIA0.cx.y, invIA1.cx.y, invIA2.cx.y, invIA3.cx.y};
+            constraint.invIA.cxz = float4{invIA0.cx.z, invIA1.cx.z, invIA2.cx.z, invIA3.cx.z};
+            constraint.invIA.cyy = float4{invIA0.cy.y, invIA1.cy.y, invIA2.cy.y, invIA3.cy.y};
+            constraint.invIA.cyz = float4{invIA0.cy.z, invIA1.cy.z, invIA2.cy.z, invIA3.cy.z};
+            constraint.invIA.czz = float4{invIA0.cz.z, invIA1.cz.z, invIA2.cz.z, invIA3.cz.z};
+            constraint.invIB.cxx = float4{invIB0.cx.x, invIB1.cx.x, invIB2.cx.x, invIB3.cx.x};
+            constraint.invIB.cxy = float4{invIB0.cx.y, invIB1.cx.y, invIB2.cx.y, invIB3.cx.y};
+            constraint.invIB.cxz = float4{invIB0.cx.z, invIB1.cx.z, invIB2.cx.z, invIB3.cx.z};
+            constraint.invIB.cyy = float4{invIB0.cy.y, invIB1.cy.y, invIB2.cy.y, invIB3.cy.y};
+            constraint.invIB.cyz = float4{invIB0.cy.z, invIB1.cy.z, invIB2.cy.z, invIB3.cy.z};
+            constraint.invIB.czz = float4{invIB0.cz.z, invIB1.cz.z, invIB2.cz.z, invIB3.cz.z};
+            b3FloatW wIAcxx = constraint.invIA.cxx;
+            b3FloatW wIAcxy = constraint.invIA.cxy;
+            b3FloatW wIAcxz = constraint.invIA.cxz;
+            b3FloatW wIAcyy = constraint.invIA.cyy;
+            b3FloatW wIAcyz = constraint.invIA.cyz;
+            b3FloatW wIAczz = constraint.invIA.czz;
+            b3FloatW wIBcxx = constraint.invIB.cxx;
+            b3FloatW wIBcxy = constraint.invIB.cxy;
+            b3FloatW wIBcxz = constraint.invIB.cxz;
+            b3FloatW wIBcyy = constraint.invIB.cyy;
+            b3FloatW wIBcyz = constraint.invIB.cyz;
+            b3FloatW wIBczz = constraint.invIB.czz;
+            b3BodyState* stateA0 = &b3_zeroBodyState;
+            if indexA0 != -1 {
+                stateA0 = states + indexA0;
+            }
+            b3BodyState* stateB0 = &b3_zeroBodyState;
+            if indexB0 != -1 {
+                stateB0 = states + indexB0;
+            }
+            b3BodyState* stateA1 = &b3_zeroBodyState;
+            if indexA1 != -1 {
+                stateA1 = states + indexA1;
+            }
+            b3BodyState* stateB1 = &b3_zeroBodyState;
+            if indexB1 != -1 {
+                stateB1 = states + indexB1;
+            }
+            b3BodyState* stateA2 = &b3_zeroBodyState;
+            if indexA2 != -1 {
+                stateA2 = states + indexA2;
+            }
+            b3BodyState* stateB2 = &b3_zeroBodyState;
+            if indexB2 != -1 {
+                stateB2 = states + indexB2;
+            }
+            b3BodyState* stateA3 = &b3_zeroBodyState;
+            if indexA3 != -1 {
+                stateA3 = states + indexA3;
+            }
+            b3BodyState* stateB3 = &b3_zeroBodyState;
+            if indexB3 != -1 {
+                stateB3 = states + indexB3;
+            }
+            var wVAx = float4{stateA0.linearVelocity.x, stateA1.linearVelocity.x, stateA2.linearVelocity.x, stateA3.linearVelocity.x};
+            var wVAy = float4{stateA0.linearVelocity.y, stateA1.linearVelocity.y, stateA2.linearVelocity.y, stateA3.linearVelocity.y};
+            var wVAz = float4{stateA0.linearVelocity.z, stateA1.linearVelocity.z, stateA2.linearVelocity.z, stateA3.linearVelocity.z};
+            var wWAx = float4{stateA0.angularVelocity.x, stateA1.angularVelocity.x, stateA2.angularVelocity.x, stateA3.angularVelocity.x};
+            var wWAy = float4{stateA0.angularVelocity.y, stateA1.angularVelocity.y, stateA2.angularVelocity.y, stateA3.angularVelocity.y};
+            var wWAz = float4{stateA0.angularVelocity.z, stateA1.angularVelocity.z, stateA2.angularVelocity.z, stateA3.angularVelocity.z};
+            var wVBx = float4{stateB0.linearVelocity.x, stateB1.linearVelocity.x, stateB2.linearVelocity.x, stateB3.linearVelocity.x};
+            var wVBy = float4{stateB0.linearVelocity.y, stateB1.linearVelocity.y, stateB2.linearVelocity.y, stateB3.linearVelocity.y};
+            var wVBz = float4{stateB0.linearVelocity.z, stateB1.linearVelocity.z, stateB2.linearVelocity.z, stateB3.linearVelocity.z};
+            var wWBx = float4{stateB0.angularVelocity.x, stateB1.angularVelocity.x, stateB2.angularVelocity.x, stateB3.angularVelocity.x};
+            var wWBy = float4{stateB0.angularVelocity.y, stateB1.angularVelocity.y, stateB2.angularVelocity.y, stateB3.angularVelocity.y};
+            var wWBz = float4{stateB0.angularVelocity.z, stateB1.angularVelocity.z, stateB2.angularVelocity.z, stateB3.angularVelocity.z};
+            b3FloatW wNormalX = constraint.normal.X;
+            b3FloatW wNormalY = constraint.normal.Y;
+            b3FloatW wNormalZ = constraint.normal.Z;
+            b3FloatW wMassSum = constraint.invMassA + constraint.invMassB;
+            b3FloatW wWarmStart = splat4(warmStartScale);
+            for i32 pointIndex = 0; pointIndex < 4; ++pointIndex {
+                b3ContactConstraintPointWide* cp = constraint.points + pointIndex;
+                var wRAx = float4{manifold0.points[pointIndex].anchorA.x, manifold1.points[pointIndex].anchorA.x, manifold2.points[pointIndex].anchorA.x, manifold3.points[pointIndex].anchorA.x};
+                var wRAy = float4{manifold0.points[pointIndex].anchorA.y, manifold1.points[pointIndex].anchorA.y, manifold2.points[pointIndex].anchorA.y, manifold3.points[pointIndex].anchorA.y};
+                var wRAz = float4{manifold0.points[pointIndex].anchorA.z, manifold1.points[pointIndex].anchorA.z, manifold2.points[pointIndex].anchorA.z, manifold3.points[pointIndex].anchorA.z};
+                var wRBx = float4{manifold0.points[pointIndex].anchorB.x, manifold1.points[pointIndex].anchorB.x, manifold2.points[pointIndex].anchorB.x, manifold3.points[pointIndex].anchorB.x};
+                var wRBy = float4{manifold0.points[pointIndex].anchorB.y, manifold1.points[pointIndex].anchorB.y, manifold2.points[pointIndex].anchorB.y, manifold3.points[pointIndex].anchorB.y};
+                var wRBz = float4{manifold0.points[pointIndex].anchorB.z, manifold1.points[pointIndex].anchorB.z, manifold2.points[pointIndex].anchorB.z, manifold3.points[pointIndex].anchorB.z};
+                cp.anchorAs.X = wRAx;
+                cp.anchorAs.Y = wRAy;
+                cp.anchorAs.Z = wRAz;
+                cp.anchorBs.X = wRBx;
+                cp.anchorBs.Y = wRBy;
+                cp.anchorBs.Z = wRBz;
+                var wSep = float4{manifold0.points[pointIndex].separation, manifold1.points[pointIndex].separation, manifold2.points[pointIndex].separation, manifold3.points[pointIndex].separation};
+                b3FloatW wDvx = wRBx - wRAx;
+                b3FloatW wDvy = wRBy - wRAy;
+                b3FloatW wDvz = wRBz - wRAz;
+                cp.baseSeparations = wSep - (wDvx * wNormalX + wDvy * wNormalY + wDvz * wNormalZ);
+                var wNormalImpulse = float4{manifold0.points[pointIndex].normalImpulse, manifold1.points[pointIndex].normalImpulse, manifold2.points[pointIndex].normalImpulse, manifold3.points[pointIndex].normalImpulse};
+                cp.normalImpulses = wWarmStart * wNormalImpulse;
+                cp.totalNormalImpulses = splat4(0.0f);
+                b3FloatW wRnAx = wRAy * wNormalZ - wRAz * wNormalY;
+                b3FloatW wRnAy = wRAz * wNormalX - wRAx * wNormalZ;
+                b3FloatW wRnAz = wRAx * wNormalY - wRAy * wNormalX;
+                b3FloatW wRnBx = wRBy * wNormalZ - wRBz * wNormalY;
+                b3FloatW wRnBy = wRBz * wNormalX - wRBx * wNormalZ;
+                b3FloatW wRnBz = wRBx * wNormalY - wRBy * wNormalX;
+                b3FloatW wMvAx = wIAcxx * wRnAx + wIAcxy * wRnAy + wIAcxz * wRnAz;
+                b3FloatW wMvAy = wIAcxy * wRnAx + wIAcyy * wRnAy + wIAcyz * wRnAz;
+                b3FloatW wMvAz = wIAcxz * wRnAx + wIAcyz * wRnAy + wIAczz * wRnAz;
+                b3FloatW wDotA = wRnAx * wMvAx + wRnAy * wMvAy + wRnAz * wMvAz;
+                b3FloatW wMvBx = wIBcxx * wRnBx + wIBcxy * wRnBy + wIBcxz * wRnBz;
+                b3FloatW wMvBy = wIBcxy * wRnBx + wIBcyy * wRnBy + wIBcyz * wRnBz;
+                b3FloatW wMvBz = wIBcxz * wRnBx + wIBcyz * wRnBy + wIBczz * wRnBz;
+                b3FloatW wDotB = wRnBx * wMvBx + wRnBy * wMvBy + wRnBz * wMvBz;
+                b3FloatW wKNormal = wMassSum + wDotA + wDotB;
+                b3FloatW wKMask = cmpgt4(wKNormal, splat4(0.0f));
+                cp.normalMasses = or4(and4(wKMask, splat4(1.0f) / wKNormal), andnot4(wKMask, splat4(0.0f)));
+                b3FloatW wVrAx = wVAx + (wWAy * wRAz - wWAz * wRAy);
+                b3FloatW wVrAy = wVAy + (wWAz * wRAx - wWAx * wRAz);
+                b3FloatW wVrAz = wVAz + (wWAx * wRAy - wWAy * wRAx);
+                b3FloatW wVrBx = wVBx + (wWBy * wRBz - wWBz * wRBy);
+                b3FloatW wVrBy = wVBy + (wWBz * wRBx - wWBx * wRBz);
+                b3FloatW wVrBz = wVBz + (wWBx * wRBy - wWBy * wRBx);
+                b3FloatW wRvx = wVrBx - wVrAx;
+                b3FloatW wRvy = wVrBy - wVrAy;
+                b3FloatW wRvz = wVrBz - wVrAz;
+                cp.relativeVelocities = wNormalX * wRvx + wNormalY * wRvy + wNormalZ * wRvz;
+            }
+            b3Vec3 centerA0 = b3Vec3_zero;
+            b3Vec3 centerB0 = b3Vec3_zero;
+            if active0 != 0 {
+                f32 totalFrictionWeight0 = 0.0f;
+                i32 pointCount0 = manifold0.pointCount;
+                for i32 pointIndex = 0; pointIndex < pointCount0; ++pointIndex {
+                    b3ManifoldPoint* mp0 = manifold0.points + pointIndex;
+                    f32 weight0 = b3ClampFloat(2.0f - mp0.separation * invTau, 1.0000000000000003e-10f, 1.0f);
+                    centerA0 = b3MulAdd(centerA0, weight0, mp0.anchorA);
+                    centerB0 = b3MulAdd(centerB0, weight0, mp0.anchorB);
+                    totalFrictionWeight0 += weight0;
                 }
-                f32 mB;
-                noinit b3Matrix3 iB;
-                noinit b3Vec3 vB;
-                noinit b3Vec3 wB;
-                if indexB == -1 {
-                    mB = 0.0f;
-                    iB = b3Mat3_zero;
-                    vB = b3Vec3_zero;
-                    wB = b3Vec3_zero;
-                } else {
-                    b3BodySim* simB = sims + indexB;
-                    mB = simB.invMass;
-                    iB = simB.invInertiaWorld;
-                    b3BodyState* stateB = states + indexB;
-                    vB = stateB.linearVelocity;
-                    wB = stateB.angularVelocity;
+                f32 invWeight0 = 1.0f / totalFrictionWeight0;
+                centerA0 = b3MulSV(invWeight0, centerA0);
+                centerB0 = b3MulSV(invWeight0, centerB0);
+            }
+            b3Vec3 centerA1 = b3Vec3_zero;
+            b3Vec3 centerB1 = b3Vec3_zero;
+            if active1 != 0 {
+                f32 totalFrictionWeight1 = 0.0f;
+                i32 pointCount1 = manifold1.pointCount;
+                for i32 pointIndex = 0; pointIndex < pointCount1; ++pointIndex {
+                    b3ManifoldPoint* mp1 = manifold1.points + pointIndex;
+                    f32 weight1 = b3ClampFloat(2.0f - mp1.separation * invTau, 1.0000000000000003e-10f, 1.0f);
+                    centerA1 = b3MulAdd(centerA1, weight1, mp1.anchorA);
+                    centerB1 = b3MulAdd(centerB1, weight1, mp1.anchorB);
+                    totalFrictionWeight1 += weight1;
                 }
-                cast(f32*, &constraint.invMassA)[lane] = mA;
-                cast(f32*, &constraint.invMassB)[lane] = mB;
-                cast(f32*, &constraint.invIA.cxx)[lane] = iA.cx.x;
-                cast(f32*, &constraint.invIA.cxy)[lane] = iA.cx.y;
-                cast(f32*, &constraint.invIA.cxz)[lane] = iA.cx.z;
-                cast(f32*, &constraint.invIA.cyy)[lane] = iA.cy.y;
-                cast(f32*, &constraint.invIA.cyz)[lane] = iA.cy.z;
-                cast(f32*, &constraint.invIA.czz)[lane] = iA.cz.z;
-                cast(f32*, &constraint.invIB.cxx)[lane] = iB.cx.x;
-                cast(f32*, &constraint.invIB.cxy)[lane] = iB.cx.y;
-                cast(f32*, &constraint.invIB.cxz)[lane] = iB.cx.z;
-                cast(f32*, &constraint.invIB.cyy)[lane] = iB.cy.y;
-                cast(f32*, &constraint.invIB.cyz)[lane] = iB.cy.z;
-                cast(f32*, &constraint.invIB.czz)[lane] = iB.cz.z;
-                b3Softness soft = indexA == -1 || indexB == -1 ? staticSoftness : contactSoftness;
-                b3Vec3 normal = manifold.normal;
-                cast(f32*, &constraint.normal.X)[lane] = normal.x;
-                cast(f32*, &constraint.normal.Y)[lane] = normal.y;
-                cast(f32*, &constraint.normal.Z)[lane] = normal.z;
-                b3Vec3 tangent1 = b3Perp(normal);
-                cast(f32*, &constraint.tangent1.X)[lane] = tangent1.x;
-                cast(f32*, &constraint.tangent1.Y)[lane] = tangent1.y;
-                cast(f32*, &constraint.tangent1.Z)[lane] = tangent1.z;
-                b3Vec3 tangent2 = b3Cross(tangent1, normal);
-                cast(f32*, &constraint.tangent2.X)[lane] = tangent2.x;
-                cast(f32*, &constraint.tangent2.Y)[lane] = tangent2.y;
-                cast(f32*, &constraint.tangent2.Z)[lane] = tangent2.z;
-                cast(f32*, &constraint.friction)[lane] = contact.friction;
-                cast(f32*, &constraint.restitution)[lane] = contact.restitution;
-                cast(f32*, &constraint.rollingResistance)[lane] = contact.rollingResistance;
-                cast(f32*, &constraint.tangentVelocity1)[lane] = b3Dot(contact.tangentVelocity, tangent1);
-                cast(f32*, &constraint.tangentVelocity2)[lane] = b3Dot(contact.tangentVelocity, tangent2);
-                cast(f32*, &constraint.biasRate)[lane] = soft.biasRate;
-                cast(f32*, &constraint.massScale)[lane] = soft.massScale;
-                cast(f32*, &constraint.impulseScale)[lane] = soft.impulseScale;
-                i32 pointCount = manifold.pointCount;
-                constraint.pointCounts[lane] = pointCount;
-                b3Vec3 centerA = b3Vec3_zero;
-                b3Vec3 centerB = b3Vec3_zero;
-                f32 totalFrictionWeight = 0.0f;
-                for i32 pointIndex = 0; pointIndex < pointCount; ++pointIndex {
-                    b3ManifoldPoint* mp = manifold.points + pointIndex;
-                    b3ContactConstraintPointWide* cp = constraint.points + pointIndex;
-                    b3Vec3 rA = mp.anchorA;
-                    b3Vec3 rB = mp.anchorB;
-                    f32 s = mp.separation;
-                    f32 weight = b3ClampFloat(2.0f - s * invTau, 1.0000000000000003e-10f, 1.0f);
-                    centerA = b3MulAdd(centerA, weight, rA);
-                    centerB = b3MulAdd(centerB, weight, rB);
-                    totalFrictionWeight += weight;
-                    cast(f32*, &cp.anchorAs.X)[lane] = rA.x;
-                    cast(f32*, &cp.anchorAs.Y)[lane] = rA.y;
-                    cast(f32*, &cp.anchorAs.Z)[lane] = rA.z;
-                    cast(f32*, &cp.anchorBs.X)[lane] = rB.x;
-                    cast(f32*, &cp.anchorBs.Y)[lane] = rB.y;
-                    cast(f32*, &cp.anchorBs.Z)[lane] = rB.z;
-                    f32 baseSeparation = s - b3Dot(b3Sub(rB, rA), normal);
-                    cast(f32*, &cp.baseSeparations)[lane] = baseSeparation;
-                    cast(f32*, &cp.normalImpulses)[lane] = warmStartScale * mp.normalImpulse;
-                    cast(f32*, &cp.totalNormalImpulses)[lane] = 0.0f;
-                    b3Vec3 rnA = b3Cross(rA, normal);
-                    b3Vec3 rnB = b3Cross(rB, normal);
-                    f32 kNormal = mA + mB + b3Dot(rnA, b3MulMV(iA, rnA)) + b3Dot(rnB, b3MulMV(iB, rnB));
-                    cast(f32*, &cp.normalMasses)[lane] = kNormal > 0.0f ? 1.0f / kNormal : 0.0f;
-                    b3Vec3 vrA = b3Add(vA, b3Cross(wA, rA));
-                    b3Vec3 vrB = b3Add(vB, b3Cross(wB, rB));
-                    cast(f32*, &cp.relativeVelocities)[lane] = b3Dot(normal, b3Sub(vrB, vrA));
+                f32 invWeight1 = 1.0f / totalFrictionWeight1;
+                centerA1 = b3MulSV(invWeight1, centerA1);
+                centerB1 = b3MulSV(invWeight1, centerB1);
+            }
+            b3Vec3 centerA2 = b3Vec3_zero;
+            b3Vec3 centerB2 = b3Vec3_zero;
+            if active2 != 0 {
+                f32 totalFrictionWeight2 = 0.0f;
+                i32 pointCount2 = manifold2.pointCount;
+                for i32 pointIndex = 0; pointIndex < pointCount2; ++pointIndex {
+                    b3ManifoldPoint* mp2 = manifold2.points + pointIndex;
+                    f32 weight2 = b3ClampFloat(2.0f - mp2.separation * invTau, 1.0000000000000003e-10f, 1.0f);
+                    centerA2 = b3MulAdd(centerA2, weight2, mp2.anchorA);
+                    centerB2 = b3MulAdd(centerB2, weight2, mp2.anchorB);
+                    totalFrictionWeight2 += weight2;
                 }
-                f32 invWeight = 1.0f / totalFrictionWeight;
-                centerA = b3MulSV(invWeight, centerA);
-                centerB = b3MulSV(invWeight, centerB);
-                cast(f32*, &constraint.centerA.X)[lane] = centerA.x;
-                cast(f32*, &constraint.centerA.Y)[lane] = centerA.y;
-                cast(f32*, &constraint.centerA.Z)[lane] = centerA.z;
-                cast(f32*, &constraint.centerB.X)[lane] = centerB.x;
-                cast(f32*, &constraint.centerB.Y)[lane] = centerB.y;
-                cast(f32*, &constraint.centerB.Z)[lane] = centerB.z;
-                for i32 pointIndex = 0; pointIndex < pointCount; ++pointIndex {
-                    b3ManifoldPoint* mp = manifold.points + pointIndex;
-                    b3ContactConstraintPointWide* cp = constraint.points + pointIndex;
-                    cast(f32*, &cp.leverArms)[lane] = b3Distance(mp.anchorA, centerA);
+                f32 invWeight2 = 1.0f / totalFrictionWeight2;
+                centerA2 = b3MulSV(invWeight2, centerA2);
+                centerB2 = b3MulSV(invWeight2, centerB2);
+            }
+            b3Vec3 centerA3 = b3Vec3_zero;
+            b3Vec3 centerB3 = b3Vec3_zero;
+            if active3 != 0 {
+                f32 totalFrictionWeight3 = 0.0f;
+                i32 pointCount3 = manifold3.pointCount;
+                for i32 pointIndex = 0; pointIndex < pointCount3; ++pointIndex {
+                    b3ManifoldPoint* mp3 = manifold3.points + pointIndex;
+                    f32 weight3 = b3ClampFloat(2.0f - mp3.separation * invTau, 1.0000000000000003e-10f, 1.0f);
+                    centerA3 = b3MulAdd(centerA3, weight3, mp3.anchorA);
+                    centerB3 = b3MulAdd(centerB3, weight3, mp3.anchorB);
+                    totalFrictionWeight3 += weight3;
                 }
-                b3Vec3 rtA1 = b3Cross(centerA, tangent1);
-                b3Vec3 rtA2 = b3Cross(centerA, tangent2);
-                b3Vec3 rtB1 = b3Cross(centerB, tangent1);
-                b3Vec3 rtB2 = b3Cross(centerB, tangent2);
-                {
-                    noinit b3Matrix2 k;
-                    k.cx.x = mA + mB + b3Dot(rtA1, b3MulMV(iA, rtA1)) + b3Dot(rtB1, b3MulMV(iB, rtB1));
-                    k.cy.y = mA + mB + b3Dot(rtA2, b3MulMV(iA, rtA2)) + b3Dot(rtB2, b3MulMV(iB, rtB2));
-                    k.cy.x = b3Dot(rtA1, b3MulMV(iA, rtA2)) + b3Dot(rtB1, b3MulMV(iB, rtB2));
-                    k.cx.y = k.cy.x;
-                    b3Matrix2 tangentMass = b3Invert2(k);
-                    cast(f32*, &constraint.tangentMass.cxx)[lane] = tangentMass.cx.x;
-                    cast(f32*, &constraint.tangentMass.cxy)[lane] = tangentMass.cx.y;
-                    cast(f32*, &constraint.tangentMass.cyy)[lane] = tangentMass.cy.y;
-                    cast(f32*, &constraint.frictionImpulse.x)[lane] = warmStartScale * b3Dot(manifold.frictionImpulse, tangent1);
-                    cast(f32*, &constraint.frictionImpulse.y)[lane] = warmStartScale * b3Dot(manifold.frictionImpulse, tangent2);
-                }
-                {
-                    f32 k = b3Dot(normal, b3MulMV(b3AddMM(iA, iB), normal));
-                    cast(f32*, &constraint.twistMass)[lane] = k > 0.0f ? 1.0f / k : 0.0f;
-                    cast(f32*, &constraint.twistImpulse)[lane] = warmStartScale * manifold.twistImpulse;
-                }
-                {
-                    b3Matrix3 rollingMass = b3InvertMatrix(b3AddMM(iA, iB));
-                    cast(f32*, &constraint.rollingMass.cxx)[lane] = rollingMass.cx.x;
-                    cast(f32*, &constraint.rollingMass.cxy)[lane] = rollingMass.cx.y;
-                    cast(f32*, &constraint.rollingMass.cxz)[lane] = rollingMass.cx.z;
-                    cast(f32*, &constraint.rollingMass.cyy)[lane] = rollingMass.cy.y;
-                    cast(f32*, &constraint.rollingMass.cyz)[lane] = rollingMass.cy.z;
-                    cast(f32*, &constraint.rollingMass.czz)[lane] = rollingMass.cz.z;
-                    cast(f32*, &constraint.rollingImpulse.X)[lane] = warmStartScale * manifold.rollingImpulse.x;
-                    cast(f32*, &constraint.rollingImpulse.Y)[lane] = warmStartScale * manifold.rollingImpulse.y;
-                    cast(f32*, &constraint.rollingImpulse.Z)[lane] = warmStartScale * manifold.rollingImpulse.z;
-                }
-                for i32 pointIndex = pointCount; pointIndex < 4; ++pointIndex {
-                    b3ContactConstraintPointWide* cp = constraint.points + pointIndex;
-                    cast(f32*, &cp.anchorAs.X)[lane] = 0.0f;
-                    cast(f32*, &cp.anchorAs.Y)[lane] = 0.0f;
-                    cast(f32*, &cp.anchorAs.Z)[lane] = 0.0f;
-                    cast(f32*, &cp.anchorBs.X)[lane] = 0.0f;
-                    cast(f32*, &cp.anchorBs.Y)[lane] = 0.0f;
-                    cast(f32*, &cp.anchorBs.Z)[lane] = 0.0f;
-                    cast(f32*, &cp.baseSeparations)[lane] = 0.0f;
-                    cast(f32*, &cp.normalImpulses)[lane] = 0.0f;
-                    cast(f32*, &cp.totalNormalImpulses)[lane] = 0.0f;
-                    cast(f32*, &cp.normalMasses)[lane] = 0.0f;
-                    cast(f32*, &cp.relativeVelocities)[lane] = 0.0f;
-                    cast(f32*, &cp.leverArms)[lane] = 0.0f;
-                }
+                f32 invWeight3 = 1.0f / totalFrictionWeight3;
+                centerA3 = b3MulSV(invWeight3, centerA3);
+                centerB3 = b3MulSV(invWeight3, centerB3);
+            }
+            var wCenterAX = float4{centerA0.x, centerA1.x, centerA2.x, centerA3.x};
+            var wCenterAY = float4{centerA0.y, centerA1.y, centerA2.y, centerA3.y};
+            var wCenterAZ = float4{centerA0.z, centerA1.z, centerA2.z, centerA3.z};
+            var wCenterBX = float4{centerB0.x, centerB1.x, centerB2.x, centerB3.x};
+            var wCenterBY = float4{centerB0.y, centerB1.y, centerB2.y, centerB3.y};
+            var wCenterBZ = float4{centerB0.z, centerB1.z, centerB2.z, centerB3.z};
+            constraint.centerA.X = wCenterAX;
+            constraint.centerA.Y = wCenterAY;
+            constraint.centerA.Z = wCenterAZ;
+            constraint.centerB.X = wCenterBX;
+            constraint.centerB.Y = wCenterBY;
+            constraint.centerB.Z = wCenterBZ;
+            for i32 pointIndex = 0; pointIndex < 4; ++pointIndex {
+                b3ContactConstraintPointWide* cp = constraint.points + pointIndex;
+                b3FloatW wDax = wCenterAX - cp.anchorAs.X;
+                b3FloatW wDay = wCenterAY - cp.anchorAs.Y;
+                b3FloatW wDaz = wCenterAZ - cp.anchorAs.Z;
+                cp.leverArms = sqrt4(wDax * wDax + wDay * wDay + wDaz * wDaz);
+            }
+            b3FloatW wT1x = constraint.tangent1.X;
+            b3FloatW wT1y = constraint.tangent1.Y;
+            b3FloatW wT1z = constraint.tangent1.Z;
+            b3FloatW wT2x = constraint.tangent2.X;
+            b3FloatW wT2y = constraint.tangent2.Y;
+            b3FloatW wT2z = constraint.tangent2.Z;
+            b3FloatW wRtA1x = wCenterAY * wT1z - wCenterAZ * wT1y;
+            b3FloatW wRtA1y = wCenterAZ * wT1x - wCenterAX * wT1z;
+            b3FloatW wRtA1z = wCenterAX * wT1y - wCenterAY * wT1x;
+            b3FloatW wRtA2x = wCenterAY * wT2z - wCenterAZ * wT2y;
+            b3FloatW wRtA2y = wCenterAZ * wT2x - wCenterAX * wT2z;
+            b3FloatW wRtA2z = wCenterAX * wT2y - wCenterAY * wT2x;
+            b3FloatW wRtB1x = wCenterBY * wT1z - wCenterBZ * wT1y;
+            b3FloatW wRtB1y = wCenterBZ * wT1x - wCenterBX * wT1z;
+            b3FloatW wRtB1z = wCenterBX * wT1y - wCenterBY * wT1x;
+            b3FloatW wRtB2x = wCenterBY * wT2z - wCenterBZ * wT2y;
+            b3FloatW wRtB2y = wCenterBZ * wT2x - wCenterBX * wT2z;
+            b3FloatW wRtB2z = wCenterBX * wT2y - wCenterBY * wT2x;
+            b3FloatW wMtA1x = wIAcxx * wRtA1x + wIAcxy * wRtA1y + wIAcxz * wRtA1z;
+            b3FloatW wMtA1y = wIAcxy * wRtA1x + wIAcyy * wRtA1y + wIAcyz * wRtA1z;
+            b3FloatW wMtA1z = wIAcxz * wRtA1x + wIAcyz * wRtA1y + wIAczz * wRtA1z;
+            b3FloatW wMtB1x = wIBcxx * wRtB1x + wIBcxy * wRtB1y + wIBcxz * wRtB1z;
+            b3FloatW wMtB1y = wIBcxy * wRtB1x + wIBcyy * wRtB1y + wIBcyz * wRtB1z;
+            b3FloatW wMtB1z = wIBcxz * wRtB1x + wIBcyz * wRtB1y + wIBczz * wRtB1z;
+            b3FloatW wMtA2x = wIAcxx * wRtA2x + wIAcxy * wRtA2y + wIAcxz * wRtA2z;
+            b3FloatW wMtA2y = wIAcxy * wRtA2x + wIAcyy * wRtA2y + wIAcyz * wRtA2z;
+            b3FloatW wMtA2z = wIAcxz * wRtA2x + wIAcyz * wRtA2y + wIAczz * wRtA2z;
+            b3FloatW wMtB2x = wIBcxx * wRtB2x + wIBcxy * wRtB2y + wIBcxz * wRtB2z;
+            b3FloatW wMtB2y = wIBcxy * wRtB2x + wIBcyy * wRtB2y + wIBcyz * wRtB2z;
+            b3FloatW wMtB2z = wIBcxz * wRtB2x + wIBcyz * wRtB2y + wIBczz * wRtB2z;
+            b3FloatW wKxx = wMassSum + (wRtA1x * wMtA1x + wRtA1y * wMtA1y + wRtA1z * wMtA1z) + (wRtB1x * wMtB1x + wRtB1y * wMtB1y + wRtB1z * wMtB1z);
+            b3FloatW wKyy = wMassSum + (wRtA2x * wMtA2x + wRtA2y * wMtA2y + wRtA2z * wMtA2z) + (wRtB2x * wMtB2x + wRtB2y * wMtB2y + wRtB2z * wMtB2z);
+            b3FloatW wKxy = wRtA1x * wMtA2x + wRtA1y * wMtA2y + wRtA1z * wMtA2z + (wRtB1x * wMtB2x + wRtB1y * wMtB2y + wRtB1z * wMtB2z);
+            b3FloatW wDet2 = wKxx * wKyy - wKxy * wKxy;
+            b3FloatW wNeg2 = cmpgt4(splat4(0.0f), wDet2);
+            b3FloatW wAbs2 = or4(and4(wNeg2, xor4(wDet2, splat4(-0.0f))), andnot4(wNeg2, wDet2));
+            b3FloatW wMask2 = cmpgt4(wAbs2, splat4(1000.0f * FLT_MIN));
+            b3FloatW wInvDet2 = splat4(1.0f) / wDet2;
+            constraint.tangentMass.cxx = or4(and4(wMask2, wInvDet2 * wKyy), andnot4(wMask2, splat4(0.0f)));
+            constraint.tangentMass.cxy = or4(and4(wMask2, xor4(wInvDet2, splat4(-0.0f)) * wKxy), andnot4(wMask2, splat4(0.0f)));
+            constraint.tangentMass.cyy = or4(and4(wMask2, wInvDet2 * wKxx), andnot4(wMask2, splat4(0.0f)));
+            var wMfiX = float4{manifold0.frictionImpulse.x, manifold1.frictionImpulse.x, manifold2.frictionImpulse.x, manifold3.frictionImpulse.x};
+            var wMfiY = float4{manifold0.frictionImpulse.y, manifold1.frictionImpulse.y, manifold2.frictionImpulse.y, manifold3.frictionImpulse.y};
+            var wMfiZ = float4{manifold0.frictionImpulse.z, manifold1.frictionImpulse.z, manifold2.frictionImpulse.z, manifold3.frictionImpulse.z};
+            constraint.frictionImpulse.x = wWarmStart * (wMfiX * wT1x + wMfiY * wT1y + wMfiZ * wT1z);
+            constraint.frictionImpulse.y = wWarmStart * (wMfiX * wT2x + wMfiY * wT2y + wMfiZ * wT2z);
+            b3FloatW wSxx = wIAcxx + wIBcxx;
+            b3FloatW wSxy = wIAcxy + wIBcxy;
+            b3FloatW wSxz = wIAcxz + wIBcxz;
+            b3FloatW wSyx = wIAcxy + wIBcxy;
+            b3FloatW wSyy = wIAcyy + wIBcyy;
+            b3FloatW wSyz = wIAcyz + wIBcyz;
+            b3FloatW wSzx = wIAcxz + wIBcxz;
+            b3FloatW wSzy = wIAcyz + wIBcyz;
+            b3FloatW wSzz = wIAczz + wIBczz;
+            b3FloatW wTvx = wSxx * wNormalX + wSyx * wNormalY + wSzx * wNormalZ;
+            b3FloatW wTvy = wSxy * wNormalX + wSyy * wNormalY + wSzy * wNormalZ;
+            b3FloatW wTvz = wSxz * wNormalX + wSyz * wNormalY + wSzz * wNormalZ;
+            b3FloatW wTwistK = wNormalX * wTvx + wNormalY * wTvy + wNormalZ * wTvz;
+            b3FloatW wTwistMask = cmpgt4(wTwistK, splat4(0.0f));
+            constraint.twistMass = or4(and4(wTwistMask, splat4(1.0f) / wTwistK), andnot4(wTwistMask, splat4(0.0f)));
+            var wTwistImpulse = float4{manifold0.twistImpulse, manifold1.twistImpulse, manifold2.twistImpulse, manifold3.twistImpulse};
+            constraint.twistImpulse = wWarmStart * wTwistImpulse;
+            b3FloatW wC1x = wSyy * wSzz - wSyz * wSzy;
+            b3FloatW wC1y = wSyz * wSzx - wSyx * wSzz;
+            b3FloatW wC1z = wSyx * wSzy - wSyy * wSzx;
+            b3FloatW wDet3 = wSxx * wC1x + wSxy * wC1y + wSxz * wC1z;
+            b3FloatW wNeg3 = cmpgt4(splat4(0.0f), wDet3);
+            b3FloatW wAbs3 = or4(and4(wNeg3, xor4(wDet3, splat4(-0.0f))), andnot4(wNeg3, wDet3));
+            b3FloatW wMask3 = cmpgt4(wAbs3, splat4(1000.0f * FLT_MIN));
+            b3FloatW wInvDet3 = splat4(1.0f) / wDet3;
+            b3FloatW wC2x = wSzy * wSxz - wSzz * wSxy;
+            b3FloatW wC2y = wSzz * wSxx - wSzx * wSxz;
+            b3FloatW wC3x = wSxy * wSyz - wSxz * wSyy;
+            b3FloatW wC3y = wSxz * wSyx - wSxx * wSyz;
+            b3FloatW wC3z = wSxx * wSyy - wSxy * wSyx;
+            constraint.rollingMass.cxx = or4(and4(wMask3, wInvDet3 * wC1x), andnot4(wMask3, splat4(0.0f)));
+            constraint.rollingMass.cxy = or4(and4(wMask3, wInvDet3 * wC2x), andnot4(wMask3, splat4(0.0f)));
+            constraint.rollingMass.cxz = or4(and4(wMask3, wInvDet3 * wC3x), andnot4(wMask3, splat4(0.0f)));
+            constraint.rollingMass.cyy = or4(and4(wMask3, wInvDet3 * wC2y), andnot4(wMask3, splat4(0.0f)));
+            constraint.rollingMass.cyz = or4(and4(wMask3, wInvDet3 * wC3y), andnot4(wMask3, splat4(0.0f)));
+            constraint.rollingMass.czz = or4(and4(wMask3, wInvDet3 * wC3z), andnot4(wMask3, splat4(0.0f)));
+            var wMriX = float4{manifold0.rollingImpulse.x, manifold1.rollingImpulse.x, manifold2.rollingImpulse.x, manifold3.rollingImpulse.x};
+            var wMriY = float4{manifold0.rollingImpulse.y, manifold1.rollingImpulse.y, manifold2.rollingImpulse.y, manifold3.rollingImpulse.y};
+            var wMriZ = float4{manifold0.rollingImpulse.z, manifold1.rollingImpulse.z, manifold2.rollingImpulse.z, manifold3.rollingImpulse.z};
+            constraint.rollingImpulse.X = wWarmStart * wMriX;
+            constraint.rollingImpulse.Y = wWarmStart * wMriY;
+            constraint.rollingImpulse.Z = wWarmStart * wMriZ;
+            for i32 pointIndex = manifold0.pointCount; pointIndex < 4; ++pointIndex {
+                b3ContactConstraintPointWide* cp = constraint.points + pointIndex;
+                cast(f32*, &cp.anchorAs.X)[0] = 0.0f;
+                cast(f32*, &cp.anchorAs.Y)[0] = 0.0f;
+                cast(f32*, &cp.anchorAs.Z)[0] = 0.0f;
+                cast(f32*, &cp.anchorBs.X)[0] = 0.0f;
+                cast(f32*, &cp.anchorBs.Y)[0] = 0.0f;
+                cast(f32*, &cp.anchorBs.Z)[0] = 0.0f;
+                cast(f32*, &cp.baseSeparations)[0] = 0.0f;
+                cast(f32*, &cp.normalImpulses)[0] = 0.0f;
+                cast(f32*, &cp.totalNormalImpulses)[0] = 0.0f;
+                cast(f32*, &cp.normalMasses)[0] = 0.0f;
+                cast(f32*, &cp.relativeVelocities)[0] = 0.0f;
+                cast(f32*, &cp.leverArms)[0] = 0.0f;
+            }
+            for i32 pointIndex = manifold1.pointCount; pointIndex < 4; ++pointIndex {
+                b3ContactConstraintPointWide* cp = constraint.points + pointIndex;
+                cast(f32*, &cp.anchorAs.X)[1] = 0.0f;
+                cast(f32*, &cp.anchorAs.Y)[1] = 0.0f;
+                cast(f32*, &cp.anchorAs.Z)[1] = 0.0f;
+                cast(f32*, &cp.anchorBs.X)[1] = 0.0f;
+                cast(f32*, &cp.anchorBs.Y)[1] = 0.0f;
+                cast(f32*, &cp.anchorBs.Z)[1] = 0.0f;
+                cast(f32*, &cp.baseSeparations)[1] = 0.0f;
+                cast(f32*, &cp.normalImpulses)[1] = 0.0f;
+                cast(f32*, &cp.totalNormalImpulses)[1] = 0.0f;
+                cast(f32*, &cp.normalMasses)[1] = 0.0f;
+                cast(f32*, &cp.relativeVelocities)[1] = 0.0f;
+                cast(f32*, &cp.leverArms)[1] = 0.0f;
+            }
+            for i32 pointIndex = manifold2.pointCount; pointIndex < 4; ++pointIndex {
+                b3ContactConstraintPointWide* cp = constraint.points + pointIndex;
+                cast(f32*, &cp.anchorAs.X)[2] = 0.0f;
+                cast(f32*, &cp.anchorAs.Y)[2] = 0.0f;
+                cast(f32*, &cp.anchorAs.Z)[2] = 0.0f;
+                cast(f32*, &cp.anchorBs.X)[2] = 0.0f;
+                cast(f32*, &cp.anchorBs.Y)[2] = 0.0f;
+                cast(f32*, &cp.anchorBs.Z)[2] = 0.0f;
+                cast(f32*, &cp.baseSeparations)[2] = 0.0f;
+                cast(f32*, &cp.normalImpulses)[2] = 0.0f;
+                cast(f32*, &cp.totalNormalImpulses)[2] = 0.0f;
+                cast(f32*, &cp.normalMasses)[2] = 0.0f;
+                cast(f32*, &cp.relativeVelocities)[2] = 0.0f;
+                cast(f32*, &cp.leverArms)[2] = 0.0f;
+            }
+            for i32 pointIndex = manifold3.pointCount; pointIndex < 4; ++pointIndex {
+                b3ContactConstraintPointWide* cp = constraint.points + pointIndex;
+                cast(f32*, &cp.anchorAs.X)[3] = 0.0f;
+                cast(f32*, &cp.anchorAs.Y)[3] = 0.0f;
+                cast(f32*, &cp.anchorAs.Z)[3] = 0.0f;
+                cast(f32*, &cp.anchorBs.X)[3] = 0.0f;
+                cast(f32*, &cp.anchorBs.Y)[3] = 0.0f;
+                cast(f32*, &cp.anchorBs.Z)[3] = 0.0f;
+                cast(f32*, &cp.baseSeparations)[3] = 0.0f;
+                cast(f32*, &cp.normalImpulses)[3] = 0.0f;
+                cast(f32*, &cp.totalNormalImpulses)[3] = 0.0f;
+                cast(f32*, &cp.normalMasses)[3] = 0.0f;
+                cast(f32*, &cp.relativeVelocities)[3] = 0.0f;
+                cast(f32*, &cp.leverArms)[3] = 0.0f;
             }
         }
         colorIndex += 1;

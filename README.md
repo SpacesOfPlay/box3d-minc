@@ -24,13 +24,13 @@ clone repo:
 ```powershell
 git clone https://github.com/SpacesOfPlay/box3d-minc
 cd box3d-minc
-./build.ps1                 # builds + runs the sample browser
+minc run                    # builds + runs the sample browser
 ```
 
 Run it in the browser instead:
 
 ```powershell
-./build.ps1 wasm            # builds, serves, opens the browser
+minc wasm                   # builds, serves, opens the browser
 ```
 
 ## Sample browser controls
@@ -58,7 +58,7 @@ void main() {
 ```
 
 ```powershell
-./build.ps1 run my_sim.mc
+minc run my_sim.mc
 ```
 
 `import box3d;` resolves from `lib/` when you build from this
@@ -73,10 +73,10 @@ binary.
 
 One version serves every target. The Box3D runtime
 (`lib/box3d_ext.mc`) is written over minc's cross-platform threading
-and timing builtins, so `./build.ps1` builds a native binary on
-Windows (D3D11), Linux and macOS, and `./build.ps1 wasm` builds the
-browser target (WebGL2) from any host. Worker threads run on all three
-native targets. `./build.ps1 wasm` is single-threaded; add `--threads`
+and timing builtins, so `minc run` builds a native binary on Windows
+(D3D11), Linux and macOS, and `minc wasm` builds the browser target
+(WebGL2) from any host. Worker threads run on all
+three native targets. The wasm build is single-threaded; add `--threads`
 to the minc call for the parallel wasm build (`live-demo/README.md`).
 
 ## Layout

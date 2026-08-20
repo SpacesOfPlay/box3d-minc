@@ -187,8 +187,7 @@ i32 fopen_s(void** f, u8* name, u8* mode) {
 }
 
 // --- math helpers ---------------------------------------------------
-// Two entry points the math module does not carry, over logf / roundf.
-f32 log2f(f32 x) { return logf(x) * 1.44269504f; }
+// One entry point the math module does not carry, over roundf.
 f32 remainderf(f32 x, f32 y) { return x - y * roundf(x / y); }
 
 // strncpy_s over a -D rename (`strncpy_s=__b3_strncpy_s`), so one

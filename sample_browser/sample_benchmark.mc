@@ -311,6 +311,8 @@ void step_large_world_world(i32 stepCount) {
 
 // samples/sample_benchmark.cpp BenchmarkLargeWorld
 void build_large_world() {
+    // the full cull box selects more floor tiles than the draw list holds
+    cam_draw_distance = 100.0f;
     create_large_world();
 }
 

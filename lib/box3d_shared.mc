@@ -9,50 +9,7 @@ import math;
 // zero-init global
 b3ShapeId b3_nullShapeId;
 // transminc: C #define values surfaced as compile-time configuration
-@define "__x86_64__" 1
-@define "NDEBUG" 1
-@define "_MSC_VER" 1900
-@define "BENCHMARK_DEBUG" 0
-@define "RAIN_LARGE_WORLD" 0
-@define "RAIN_GRID_COUNT" 10
-@define "RAIN_GROUP_SIZE" 3
-@define "STATIC_FLOOR_GRID" 1000
-@define "STATIC_FLOOR_SPHERES" 100
-@define "STATIC_FLOOR_DROP_INTERVAL" 5
-@define "RAGDOLL_GROUP_SIZE" 2
-@define "RAGDOLL_GRID_COUNT" 2
-@define "WAVE_PILE_BODY_COUNT" 100
-@define "QUERY_SPAWN_COUNT" 50
-@define "WAVE_PILE_GRID" 5
-@define "WAVE_PILE_LAYERS" 4
-@define "MESH_DROP_GRID_COUNT" 20
-@define "OVERFLOW_PILE_RING_COUNT" 5
-@define "OVERFLOW_PILE_PER_RING" 5
-@define "B3_ENABLE_VALIDATION" 0
-@define "B3_NULL_INDEX" -1
 @define "B3_HASH_INIT" 5381
-@define "B3_MAX_WORKERS" 32
-@define "B3_MAX_TASKS" 256
-@define "B3_GRAPH_COLOR_COUNT" 24
-@define "B3_CONTACT_MANIFOLD_COUNT_BUCKETS" 8
-@define "B3_MAX_WORLDS" 128
-@define "B3_MAX_MANIFOLD_POINTS" 4
-@define "B3_MAX_SHAPE_CAST_POINTS" 64
-@define "B3_GYROSCOPIC_ITERATIONS" 1
-@define "B3_MAX_HULL_VERTICES" 128
-@define "B3_MAX_HULL_FACES" 128
-@define "B3_MAX_HULL_EDGES" 128
-@define "B3_SHAPE_POWER" 22
-@define "B3_RESTITUTION_ITERATIONS" 1
-@define "B3_DYNAMIC_TREE_VERSION" -7787375179321898166
-@define "B3_HULL_VERSION" -2715301031560262655
-@define "B3_MESH_VERSION" -6066037853393090451
-@define "B3_HEIGHT_FIELD_HOLE" 255
-@define "B3_HEIGHT_FIELD_VERSION" -8423759003537458044
-@define "B3_MAX_COMPOUND_MESH_MATERIALS" 4
-@define "FILTER_JOINT_COUNT" 8
-@define "RAND_LIMIT" 32767
-@define "RAND_SEED" 12345
 
 type errno_t = i32;
 struct Group {
@@ -75,7 +32,7 @@ struct StaticFloorData {
     i32 spheresDropped;
 }
 
-struct __anon_box3d_shared_struct_16 {
+struct g_treeData_t {
     b3MeshData* meshData;
 }
 
@@ -90,8 +47,6 @@ struct ConvexPileRandom {
     u32 state;
 }
 
-// SPDX-FileCopyrightText: 2022 Erin Catto
-// SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2025 Erin Catto
 // SPDX-License-Identifier: MIT
 struct RagdollGroup {
@@ -148,8 +103,6 @@ struct QuerySpawnOverlapContext {
 
 // SPDX-FileCopyrightText: 2026 Erin Catto
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Erin Catto
-// SPDX-License-Identifier: MIT
 // Thin fast boxes dropped on a wave mesh. Stresses continuous collision and mesh contact
 // stability, and doubles as a determinism scenario via the sleep hash.
 struct MeshDropData {
@@ -162,8 +115,6 @@ struct MeshDropData {
 
 // SPDX-FileCopyrightText: 2026 Erin Catto
 // SPDX-License-Identifier: MIT
-// SPDX-FileCopyrightText: 2026 Erin Catto
-// SPDX-License-Identifier: MIT
 // One heavy dynamic hub surrounded by enough dynamic neighbors that the hub's
 // degree in the dyn-dyn contact graph exceeds B3_DYNAMIC_COLOR_COUNT (= 20).
 // The excess contacts land in the overflow color (B3_GRAPH_COLOR_COUNT - 1),
@@ -174,17 +125,16 @@ struct OverflowColorPileData {
     i32 neighborCount;
 }
 
-// void CreateSpinner( b3WorldId worldId );
-// float StepSpinner( b3WorldId worldId, int stepCount );
-// void CreateSmash( b3WorldId worldId );
-// void CreateTumbler( b3WorldId worldId );
 private { b3ShapeId g_groundShapeId; }
+
 b3ShapeId GetGroundShapeId() {
     return g_groundShapeId;
 }
+
 void ResetGroundShapeId() {
     g_groundShapeId = b3_nullShapeId;
 }
+
 void CreateJointGrid(b3WorldId worldId) {
     b3World_EnableSleeping(worldId, false);
     i32 n = 0 != 0 ? 10 : 100;
@@ -228,6 +178,7 @@ void CreateJointGrid(b3WorldId worldId) {
     }
     free(bodies);
 }
+
 // The 80 block version falls over after 1000 steps.
 void CreateLargePyramid(b3WorldId worldId) {
     b3World_EnableSleeping(worldId, false);
@@ -257,6 +208,7 @@ void CreateLargePyramid(b3WorldId worldId) {
         }
     }
 }
+
 void CreateWidePyramid(b3WorldId worldId) {
     {
         b3BodyDef bodyDef = b3DefaultBodyDef();
@@ -288,6 +240,7 @@ void CreateWidePyramid(b3WorldId worldId) {
         }
     }
 }
+
 private {
 void CreateSmallPyramid(b3WorldId worldId, i32 baseCount, f32 extent, f32 centerX, f32 baseZ) {
     b3BodyDef bodyDef = b3DefaultBodyDef();
@@ -307,6 +260,7 @@ void CreateSmallPyramid(b3WorldId worldId, i32 baseCount, f32 extent, f32 center
     }
 }
 }
+
 void CreateManyPyramids(b3WorldId worldId) {
     i32 baseCount = 10;
     f32 extent = 0.5f;
@@ -333,8 +287,10 @@ void CreateManyPyramids(b3WorldId worldId) {
     }
 }
 RainData g_rainData;
+
 void GetRainCapacity(b3Capacity* capacity) {
 }
+
 void CreateRain(b3WorldId worldId) {
     memset(&g_rainData, 0, cast(u64, sizeof(g_rainData)));
     g_rainData.groups = new(Group[10 * 10]);
@@ -358,12 +314,14 @@ void CreateRain(b3WorldId worldId) {
         bodyDef.position.x += 15.0f;
     }
 }
+
 void DestroyRain() {
     b3DestroyMesh(g_rainData.gridMesh);
     b3DestroyMesh(g_rainData.torusMesh);
     free(g_rainData.groups);
     g_rainData.groups = null;
 }
+
 void CreateGroup(b3WorldId worldId, i32 rowIndex, i32 columnIndex) {
     i32 groupIndex = rowIndex * 10 + columnIndex;
     f32 span = 10.0f * 15.0f;
@@ -374,7 +332,7 @@ void CreateGroup(b3WorldId worldId, i32 rowIndex, i32 columnIndex) {
     position.z = -0.5f * span + groupDistance * (cast(f32, rowIndex) + 0.5f);
     f32 frictionTorque = 5.0f;
     f32 hertz = 1.0f;
-    f32 dampingRatio = 0.7000000000000001f;
+    f32 dampingRatio = 0.7f;
     bool colorize = false;
     for i32 i = 0; i < 3; ++i {
         Human* human = g_rainData.groups[groupIndex].humans + i;
@@ -382,14 +340,16 @@ void CreateGroup(b3WorldId worldId, i32 rowIndex, i32 columnIndex) {
         position.x += 0.75f;
     }
 }
+
 void DestroyGroup(i32 rowIndex, i32 columnIndex) {
     i32 groupIndex = rowIndex * 10 + columnIndex;
     for i32 i = 0; i < 3; ++i {
         DestroyHuman(g_rainData.groups[groupIndex].humans + i);
     }
 }
+
 void StepRain(b3WorldId worldId, i32 stepCount) {
-    i32 delay = 0 != 0 ? 127 : 47;
+    i32 delay = 0 != 0 ? 0x7F : 0x2F;
     i32 increment = 0 != 0 ? 100 : 1;
     if (stepCount & delay) == 0 {
         if g_rainData.columnCount < 10 {
@@ -410,6 +370,7 @@ void StepRain(b3WorldId worldId, i32 stepCount) {
     }
 }
 private { StaticFloorData g_staticFloorData; }
+
 void GetLargeWorldCapacity(b3Capacity* capacity) {
     i32 floorCount = 1000 * 1000;
     capacity.staticShapeCount = floorCount;
@@ -418,6 +379,7 @@ void GetLargeWorldCapacity(b3Capacity* capacity) {
     capacity.dynamicBodyCount = 100;
     capacity.contactCount = b3MaxInt(1024, 8 * 100);
 }
+
 void CreateLargeWorld(b3WorldId worldId) {
     memset(&g_staticFloorData, 0, cast(u64, sizeof(g_staticFloorData)));
     f32 cell = 10.0f;
@@ -437,6 +399,7 @@ void CreateLargeWorld(b3WorldId worldId) {
         }
     }
 }
+
 void StepLargeWorld(b3WorldId worldId, i32 stepCount) {
     if g_staticFloorData.spheresDropped >= 100 {
         return;
@@ -468,6 +431,7 @@ void StepLargeWorld(b3WorldId worldId, i32 stepCount) {
     b3CreateSphereShape(body, &shapeDef, &sphere);
     g_staticFloorData.spheresDropped += 1;
 }
+
 void GetWasherCapacity(b3Capacity* capacity) {
     capacity.staticShapeCount = 16;
     capacity.dynamicShapeCount = 10000;
@@ -475,6 +439,7 @@ void GetWasherCapacity(b3Capacity* capacity) {
     capacity.dynamicBodyCount = 10000;
     capacity.contactCount = 60000;
 }
+
 void CreateWasher(b3WorldId worldId) {
     bool kinematic = true;
     noinit b3BodyId groundId;
@@ -580,7 +545,8 @@ void CreateWasher(b3WorldId worldId) {
         x += 4.0f * a;
     }
 }
-__anon_box3d_shared_struct_16 g_treeData;
+g_treeData_t g_treeData;
+
 private {
 void CreateTrees(b3WorldId worldId, i32 scale) {
     memset(&g_treeData, 0, cast(u64, sizeof(g_treeData)));
@@ -614,7 +580,7 @@ void CreateTrees(b3WorldId worldId, i32 scale) {
     for i32 i = 0; i < hullCount; ++i {
         hulls[i] = b3CreateCylinder(l + 2.0f * r, r, y - r, 6);
         y += l + 2.0f * r;
-        r = 0.9500000000000001f * r;
+        r = 0.95f * r;
     }
     f32 angularVelocity = -0.5f;
     f32 z = 0 != 0 ? -15.0f : -70.0f;
@@ -641,20 +607,25 @@ void CreateTrees(b3WorldId worldId, i32 scale) {
     }
 }
 }
+
 void CreateTrees25(b3WorldId worldId) {
     CreateTrees(worldId, 4);
 }
+
 void CreateTrees50(b3WorldId worldId) {
     CreateTrees(worldId, 2);
 }
+
 void CreateTrees100(b3WorldId worldId) {
     CreateTrees(worldId, 1);
 }
+
 void DestroyTrees() {
     b3DestroyMesh(g_treeData.meshData);
     memset(&g_treeData, 0, cast(u64, sizeof(g_treeData)));
 }
 JunkyardData g_junkyardData;
+
 void CreateJunkyard(b3WorldId worldId) {
     noinit b3BodyId groundId;
     {
@@ -721,6 +692,7 @@ void CreateJunkyard(b3WorldId worldId) {
     b3CreateHullShape(g_junkyardData.pusherId, &shapeDef, hull);
     b3DestroyHull(hull);
 }
+
 void GetJunkyardCapacity(b3Capacity* capacity) {
     capacity.staticShapeCount = 16;
     capacity.dynamicShapeCount = 20 * 20 * 24 + 1;
@@ -728,6 +700,7 @@ void GetJunkyardCapacity(b3Capacity* capacity) {
     capacity.dynamicBodyCount = 20 * 20 * 24 + 1;
     capacity.contactCount = 250 * 1024;
 }
+
 void StepJunkyard(b3WorldId worldId, i32 stepCount) {
     ignore worldId;
     ignore stepCount;
@@ -740,6 +713,7 @@ void StepJunkyard(b3WorldId worldId, i32 stepCount) {
     var target = b3WorldTransform{.p = targetPos, .q = b3Quat_identity};
     b3Body_SetTargetTransform(g_junkyardData.pusherId, target, timeStep, false);
 }
+
 // Huge pile of large convexes, ported from PEEL. Each convex is the hull of 32 random points on a
 // sphere. A fixed LCG seed makes the hull identical across runs so results compare directly.
 void GetConvexPileCapacity(b3Capacity* capacity) {
@@ -747,15 +721,18 @@ void GetConvexPileCapacity(b3Capacity* capacity) {
     capacity.dynamicBodyCount = 5120;
     capacity.contactCount = 50 * 1024;
 }
+
 private {
 u32 NextConvexPileRandom(ConvexPileRandom* rng) {
     rng.state = rng.state * 2147001325 + 715136305;
     return rng.state;
 }
+
 // Float in [-0.5, 0.5]
 f32 ConvexPileRandomFloat(ConvexPileRandom* rng) {
-    return cast(f32, NextConvexPileRandom(rng) & 65535) / 65535.0f - 0.5f;
+    return cast(f32, NextConvexPileRandom(rng) & 0xffff) / 65535.0f - 0.5f;
 }
+
 // Uniform random direction, rejection sampled inside the unit sphere then pushed to the surface
 b3Vec3 UnitRandomPoint(ConvexPileRandom* rng) {
     noinit b3Vec3 point;
@@ -770,6 +747,7 @@ b3Vec3 UnitRandomPoint(ConvexPileRandom* rng) {
     return b3Normalize(point);
 }
 }
+
 void CreateConvexPile(b3WorldId worldId) {
     {
         b3BodyDef bodyDef = b3DefaultBodyDef();
@@ -808,6 +786,7 @@ void CreateConvexPile(b3WorldId worldId) {
     }
     b3DestroyHull(convex);
 }
+
 private {
 void CreateGroup(FallingRagdollData* data, b3WorldId worldId, i32 rowIndex, i32 columnIndex) {
     i32 groupIndex = rowIndex * 2 + columnIndex;
@@ -819,7 +798,7 @@ void CreateGroup(FallingRagdollData* data, b3WorldId worldId, i32 rowIndex, i32 
     position.z = -0.5f * span + groupDistance * (cast(f32, rowIndex) + 0.5f);
     f32 frictionTorque = 5.0f;
     f32 hertz = 1.0f;
-    f32 dampingRatio = 0.7000000000000001f;
+    f32 dampingRatio = 0.7f;
     bool colorize = false;
     for i32 i = 0; i < 2; ++i {
         Human* human = data.groups[groupIndex].humans + i;
@@ -828,6 +807,7 @@ void CreateGroup(FallingRagdollData* data, b3WorldId worldId, i32 rowIndex, i32 
     }
 }
 }
+
 FallingRagdollData CreateFallingRagdolls(b3WorldId worldId) {
     FallingRagdollData data;
     i32 halfMeshGridRows = 4;
@@ -851,6 +831,7 @@ FallingRagdollData CreateFallingRagdolls(b3WorldId worldId) {
     }
     return data;
 }
+
 bool UpdateFallingRagdolls(b3WorldId worldId, FallingRagdollData* data) {
     if data.hash == 0 {
         b3BodyEvents bodyEvents = b3World_GetBodyEvents(worldId);
@@ -876,17 +857,19 @@ bool UpdateFallingRagdolls(b3WorldId worldId, FallingRagdollData* data) {
     data.stepCount += 1;
     return data.hash != 0;
 }
+
 void DestroyFallingRagdolls(FallingRagdollData* data) {
     b3DestroyMesh(data.gridMesh);
     b3DestroyMesh(data.torusMesh);
     data.gridMesh = null;
     data.torusMesh = null;
 }
+
 WavePileData CreateWavePile(b3WorldId worldId) {
     WavePileData data;
     g_randomSeed = 52977;
     i32 fieldCount = 21;
-    var fieldScale = b3Vec3{1.0f, 0.6000000000000001f, 1.0f};
+    var fieldScale = b3Vec3{1.0f, 0.6f, 1.0f};
     data.heightField = b3CreateWave(fieldCount, fieldCount, fieldScale, 0.08f, 0.06f, false);
     {
         f32 extent = fieldScale.x * cast(f32, fieldCount - 1);
@@ -898,21 +881,21 @@ WavePileData CreateWavePile(b3WorldId worldId) {
         b3CreateHeightFieldShape(groundId, &shapeDef, data.heightField);
     }
     b3HullData* rock = b3CreateRock(0.55f);
-    b3BoxHull box = b3MakeBoxHull(0.45f, 0.30000000000000004f, 0.55f);
+    b3BoxHull box = b3MakeBoxHull(0.45f, 0.3f, 0.55f);
     var sphere = b3Sphere{b3Vec3_zero, 0.5f};
-    var capsule = b3Capsule{b3Vec3{0.0f, -0.30000000000000004f, 0.0f}, b3Vec3{0.0f, 0.30000000000000004f, 0.0f}, 0.35000000000000003f};
+    var capsule = b3Capsule{b3Vec3{0.0f, -0.3f, 0.0f}, b3Vec3{0.0f, 0.3f, 0.0f}, 0.35f};
     b3BodyDef bodyDef = b3DefaultBodyDef();
     bodyDef.type = b3_dynamicBody;
     b3ShapeDef shapeDef = b3DefaultShapeDef();
-    shapeDef.baseMaterial.rollingResistance = 0.30000000000000004f;
+    shapeDef.baseMaterial.rollingResistance = 0.3f;
     f32 spacing = 1.7f;
     i32 index = 0;
     for i32 layer = 0; layer < 4; ++layer {
         for i32 i = 0; i < 5; ++i {
             for i32 j = 0; j < 5; ++j {
-                b3Vec3 jitter = RandomVec3Uniform(-0.30000000000000004f, 0.30000000000000004f);
+                b3Vec3 jitter = RandomVec3Uniform(-0.3f, 0.3f);
                 bodyDef.position.x = spacing * (cast(f32, i) - 0.5f * cast(f32, 5 - 1)) + jitter.x;
-                bodyDef.position.y = 2.5f + 1.6f * cast(f32, layer) + 0.30000000000000004f * jitter.y;
+                bodyDef.position.y = 2.5f + 1.6f * cast(f32, layer) + 0.3f * jitter.y;
                 bodyDef.position.z = spacing * (cast(f32, j) - 0.5f * cast(f32, 5 - 1)) + jitter.z;
                 bodyDef.rotation = RandomQuat();
                 b3BodyId bodyId = b3CreateBody(worldId, &bodyDef);
@@ -938,6 +921,7 @@ WavePileData CreateWavePile(b3WorldId worldId) {
     b3DestroyHull(rock);
     return data;
 }
+
 bool UpdateWavePile(b3WorldId worldId, WavePileData* data) {
     if data.hash == 0 {
         if b3World_GetAwakeBodyCount(worldId) == 0 {
@@ -952,10 +936,12 @@ bool UpdateWavePile(b3WorldId worldId, WavePileData* data) {
     data.stepCount += 1;
     return data.hash != 0;
 }
+
 void DestroyWavePile(WavePileData* data) {
     b3DestroyHeightField(data.heightField);
     data.heightField = null;
 }
+
 private {
 bool QuerySpawnOverlapCallback(b3ShapeId shapeId, void* context) {
     QuerySpawnOverlapContext* overlap = context;
@@ -964,6 +950,7 @@ bool QuerySpawnOverlapCallback(b3ShapeId shapeId, void* context) {
     overlap.data.queryHash = b3Hash(overlap.data.queryHash, cast(u8*, &shapeId.index1), cast(i32, sizeof(shapeId.index1)));
     return true;
 }
+
 f32 QuerySpawnCastCallback(b3ShapeId shapeId, b3Pos point, b3Vec3 normal, f32 fraction, u64 userMaterialId, i32 triangleIndex, i32 childIndex, void* context) {
     ignore shapeId;
     ignore point;
@@ -975,6 +962,7 @@ f32 QuerySpawnCastCallback(b3ShapeId shapeId, b3Pos point, b3Vec3 normal, f32 fr
     *closest = fraction;
     return fraction;
 }
+
 void QuerySpawnOnce(b3WorldId worldId, QuerySpawnData* data) {
     b3QueryFilter filter = b3DefaultQueryFilter();
     b3Pos rayOrigin = RandomPos(b3Vec3{-12.0f, -12.0f, -12.0f}, b3Vec3{12.0f, 12.0f, 12.0f});
@@ -1012,7 +1000,7 @@ void QuerySpawnOnce(b3WorldId worldId, QuerySpawnData* data) {
         data.queryHash = b3Hash(data.queryHash, cast(u8*, &fraction), cast(i32, sizeof(fraction)));
     }
     data.castFraction = fraction;
-    f32 size = 0.30000000000000004f + 0.2f * fraction;
+    f32 size = 0.3f + 0.2f * fraction;
     b3BodyDef bodyDef = b3DefaultBodyDef();
     bodyDef.type = b3_dynamicBody;
     bodyDef.position = spawnPosition;
@@ -1034,14 +1022,18 @@ void QuerySpawnOnce(b3WorldId worldId, QuerySpawnData* data) {
         }
         case 1: {
             {
-                var capsule = b3Capsule{b3Vec3{0.0f, -size, 0.0f}, b3Vec3{0.0f, size, 0.0f}, 0.7000000000000001f * size};
+                var capsule = b3Capsule{
+                    b3Vec3{0.0f, -size, 0.0f},
+                    b3Vec3{0.0f, size, 0.0f},
+                    0.7f * size,
+                };
                 b3CreateCapsuleShape(bodyId, &shapeDef, &capsule);
                 break case;
             }
         }
         default: {
             {
-                b3BoxHull box = b3MakeBoxHull(size, 0.7000000000000001f * size, 0.5f * size);
+                b3BoxHull box = b3MakeBoxHull(size, 0.7f * size, 0.5f * size);
                 b3CreateHullShape(bodyId, &shapeDef, &box.base);
                 break case;
             }
@@ -1052,12 +1044,14 @@ void QuerySpawnOnce(b3WorldId worldId, QuerySpawnData* data) {
     data.lastSpawnPosition = spawnPosition;
 }
 }
+
 QuerySpawnData CreateQuerySpawn(b3WorldId worldId) {
     QuerySpawnData data;
     g_randomSeed = 71689;
     b3World_SetGravity(worldId, b3Vec3_zero);
     return data;
 }
+
 bool UpdateQuerySpawn(b3WorldId worldId, QuerySpawnData* data) {
     if data.spawnCount < 50 {
         QuerySpawnOnce(worldId, data);
@@ -1072,9 +1066,11 @@ bool UpdateQuerySpawn(b3WorldId worldId, QuerySpawnData* data) {
     data.stepCount += 1;
     return data.hash != 0;
 }
+
 void DestroyQuerySpawn(QuerySpawnData* data) {
     ignore data;
 }
+
 MeshDropData CreateMeshDrop(b3WorldId worldId, b3Pos origin) {
     MeshDropData data;
     {
@@ -1105,7 +1101,10 @@ MeshDropData CreateMeshDrop(b3WorldId worldId, b3Pos origin) {
             for i32 j = 0; j < gridCount; ++j {
                 b3Vec3 linearVelocity = RandomVec3Uniform(-1.0f, 1.0f);
                 b3Vec3 angularVelocity = RandomVec3Uniform(-5.0f, 5.0f);
-                bodyDef.position = b3OffsetPos(origin, b3Vec3{0.5f * (cast(f32, i) - 0.5f * cast(f32, gridCount)), 5.0f, 0.5f * (cast(f32, j) - 0.5f * cast(f32, gridCount))});
+                bodyDef.position = b3OffsetPos(origin, b3Vec3{
+                    0.5f * (cast(f32, i) - 0.5f * cast(f32, gridCount)), 5.0f,
+                    0.5f * (cast(f32, j) - 0.5f * cast(f32, gridCount)),
+                });
                 bodyDef.linearVelocity = linearVelocity;
                 bodyDef.angularVelocity = angularVelocity;
                 b3BodyId bodyId = b3CreateBody(worldId, &bodyDef);
@@ -1116,6 +1115,7 @@ MeshDropData CreateMeshDrop(b3WorldId worldId, b3Pos origin) {
     }
     return data;
 }
+
 bool UpdateMeshDrop(b3WorldId worldId, MeshDropData* data) {
     if data.hash == 0 {
         if b3World_GetAwakeBodyCount(worldId) == 0 {
@@ -1131,9 +1131,11 @@ bool UpdateMeshDrop(b3WorldId worldId, MeshDropData* data) {
     data.stepCount += 1;
     return data.hash != 0;
 }
+
 void DestroyMeshDrop(MeshDropData* data) {
     b3DestroyMesh(data.mesh);
 }
+
 OverflowColorPileData CreateOverflowColorPile(b3WorldId worldId) {
     OverflowColorPileData data;
     data.neighborCount = 5 * 5;
@@ -1171,7 +1173,9 @@ OverflowColorPileData CreateOverflowColorPile(b3WorldId worldId) {
             f32 theta = thetaOffset + 2.0f * 3.14159265359f * cast(f32, slot) / 5.0f;
             b3BodyDef bodyDef = b3DefaultBodyDef();
             bodyDef.type = b3_dynamicBody;
-            bodyDef.position = b3Pos{ringRadius * cast(f32, cosf(theta)), y, ringRadius * cast(f32, sinf(theta))};
+            bodyDef.position = b3Pos{
+                ringRadius * cast(f32, cosf(theta)), y, ringRadius * cast(f32, sinf(theta)),
+            };
             b3BodyId bodyId = b3CreateBody(worldId, &bodyDef);
             b3CreateHullShape(bodyId, &neighborShape, &neighborBox.base);
         }

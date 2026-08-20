@@ -28,6 +28,22 @@ struct PerDraw {
     float4 params;   // x: ground-grid cell size (0 = off)
 }
 
+// Instanced solids. One record per shape, stepped per instance; row0..2
+// are the rows of the model matrix's affine 3x4, tint and params carry
+// what PerDraw carries.
+struct InstRec {
+    float4 row0;
+    float4 row1;
+    float4 row2;
+    float4 tint;
+    float4 params;
+}
+
+// Clip matrix for a whole pass, applied once per pipeline bind.
+struct InstPass {
+    float4x4 viewproj;
+}
+
 // Per-pass shadow data (uniform slot 1). Each cascade matrix folds in
 // the clip-space-to-texture-space remap, so the fragment shader divides
 // by w and uses xy as the lookup, z as the reference depth.
@@ -89,28 +105,6 @@ const f32 EDGE_THICKNESS_PX = 1.5f;   // upstream edges.c thicknessPx
 // has geometry to ramp down inside. fwidth is an L1 norm and peaks at
 // sqrt(2) on a 45 degree line, so the pad must be >= ~1.42.
 const f32 EDGE_AA_PAD_PX = 1.5f;
-
-@shader vertex
-VsOut b3_vs(
-    @attr(0) float3 position,
-    @attr(1) float3 normal,
-    @uniform(0) PerDraw d
-) {
-    VsOut o;
-    o.pos = mul(d.mvp, float4{position.x, position.y, position.z, 1.0f});
-    // upstream shapes/geom.glsl: the world normal is R * (normal /
-    // scale). model carries R*S here, so divide by scale twice.
-    // params.yzw is 1/scale^2 per axis.
-    float4 n4 = mul(d.model, float4{normal.x * d.params.y,
-                                    normal.y * d.params.z,
-                                    normal.z * d.params.w, 0.0f});
-    o.normal = normalize(float3{n4.x, n4.y, n4.z});
-    o.tint = d.tint;
-    float4 w = mul(d.model, float4{position.x, position.y, position.z, 1.0f});
-    o.wpos = float3{w.x, w.y, w.z};
-    o.cell = d.params.x;
-    return o;
-}
 
 @shader fragment
 float4 b3_fs(
@@ -233,65 +227,123 @@ float4 b3_dbg_fs(DbgOut input) {
     return input.color;
 }
 
+@shader fragment
+float4 b3_depth_fs(EdgeOut input) {
+    return float4{0.0f, 0.0f, 0.0f, 1.0f};
+}
+
+// --- solids -----------------------------------------------------------
+//
+// The model matrix and the shape's tint/params arrive as per-instance
+// attributes; only the pass matrix is a uniform.
+
+@shader vertex
+VsOut b3_inst_vs(
+    @attr(0) float3 position,
+    @attr(1) float3 normal,
+    @attr(2) float4 irow0,
+    @attr(3) float4 irow1,
+    @attr(4) float4 irow2,
+    @attr(5) float4 itint,
+    @attr(6) float4 iparams,
+    @uniform(0) InstPass u
+) {
+    f32 wx = irow0.x * position.x + irow0.y * position.y + irow0.z * position.z + irow0.w;
+    f32 wy = irow1.x * position.x + irow1.y * position.y + irow1.z * position.z + irow1.w;
+    f32 wz = irow2.x * position.x + irow2.y * position.y + irow2.z * position.z + irow2.w;
+    // rows carry R*S, so the normal divides by scale twice; params.yzw
+    // is 1/scale^2 per axis
+    f32 nx = normal.x * iparams.y;
+    f32 ny = normal.y * iparams.z;
+    f32 nz = normal.z * iparams.w;
+    VsOut o;
+    o.pos = mul(u.viewproj, float4{wx, wy, wz, 1.0f});
+    o.normal = normalize(float3{irow0.x * nx + irow0.y * ny + irow0.z * nz,
+                                irow1.x * nx + irow1.y * ny + irow1.z * nz,
+                                irow2.x * nx + irow2.y * ny + irow2.z * nz});
+    o.tint = itint;
+    o.wpos = float3{wx, wy, wz};
+    o.cell = iparams.x;
+    return o;
+}
+
 // Capsule. Vertices store the unit direction in `normal` and that
 // direction offset by the cap sign along x in `position`, so a point
 // rebuilds as normal*radius + capSign*halfLength. Sized here rather
 // than by a model-matrix scale, which squashes the caps. params.y is
 // the half-length, params.z the radius.
 @shader vertex
-VsOut b3_cap_vs(
+VsOut b3_inst_cap_vs(
     @attr(0) float3 position,
     @attr(1) float3 normal,
-    @uniform(0) PerDraw d
+    @attr(2) float4 irow0,
+    @attr(3) float4 irow1,
+    @attr(4) float4 irow2,
+    @attr(5) float4 itint,
+    @attr(6) float4 iparams,
+    @uniform(0) InstPass u
 ) {
-    f32 halfLen = d.params.y;
-    f32 radius = d.params.z;
+    f32 halfLen = iparams.y;
+    f32 radius = iparams.z;
     f32 capOff = position.x >= 0.0f ? halfLen : 0.0f - halfLen;
     float3 lp = float3{normal.x * radius + capOff, normal.y * radius, normal.z * radius};
+    f32 wx = irow0.x * lp.x + irow0.y * lp.y + irow0.z * lp.z + irow0.w;
+    f32 wy = irow1.x * lp.x + irow1.y * lp.y + irow1.z * lp.z + irow1.w;
+    f32 wz = irow2.x * lp.x + irow2.y * lp.y + irow2.z * lp.z + irow2.w;
     VsOut o;
-    o.pos = mul(d.mvp, float4{lp.x, lp.y, lp.z, 1.0f});
-    float4 n4 = mul(d.model, float4{normal.x, normal.y, normal.z, 0.0f});
-    o.normal = normalize(float3{n4.x, n4.y, n4.z});
-    o.tint = d.tint;
-    float4 w = mul(d.model, float4{lp.x, lp.y, lp.z, 1.0f});
-    o.wpos = float3{w.x, w.y, w.z};
+    o.pos = mul(u.viewproj, float4{wx, wy, wz, 1.0f});
+    o.normal = normalize(float3{
+        irow0.x * normal.x + irow0.y * normal.y + irow0.z * normal.z,
+        irow1.x * normal.x + irow1.y * normal.y + irow1.z * normal.z,
+        irow2.x * normal.x + irow2.y * normal.y + irow2.z * normal.z});
+    o.tint = itint;
+    o.wpos = float3{wx, wy, wz};
     o.cell = 0.0f;
     return o;
 }
 
-// Shadow pass: depth only. PerDraw.mvp carries the light
-// view-projection times the model matrix.
 @shader vertex
-EdgeOut b3_depth_vs(
+EdgeOut b3_inst_depth_vs(
     @attr(0) float3 position,
     @attr(1) float3 normal,
-    @uniform(0) PerDraw d
+    @attr(2) float4 irow0,
+    @attr(3) float4 irow1,
+    @attr(4) float4 irow2,
+    @attr(5) float4 itint,
+    @attr(6) float4 iparams,
+    @uniform(0) InstPass u
 ) {
+    f32 wx = irow0.x * position.x + irow0.y * position.y + irow0.z * position.z + irow0.w;
+    f32 wy = irow1.x * position.x + irow1.y * position.y + irow1.z * position.z + irow1.w;
+    f32 wz = irow2.x * position.x + irow2.y * position.y + irow2.z * position.z + irow2.w;
     EdgeOut o;
-    o.pos = mul(d.mvp, float4{position.x, position.y, position.z, 1.0f});
-    o.tint = d.tint;
+    o.pos = mul(u.viewproj, float4{wx, wy, wz, 1.0f});
+    o.tint = itint;
     return o;
 }
 
-// Capsule depth: same in-shader sizing as b3_cap_vs.
 @shader vertex
-EdgeOut b3_cap_depth_vs(
+EdgeOut b3_inst_cap_depth_vs(
     @attr(0) float3 position,
     @attr(1) float3 normal,
-    @uniform(0) PerDraw d
+    @attr(2) float4 irow0,
+    @attr(3) float4 irow1,
+    @attr(4) float4 irow2,
+    @attr(5) float4 itint,
+    @attr(6) float4 iparams,
+    @uniform(0) InstPass u
 ) {
-    f32 halfLen = d.params.y;
-    f32 radius = d.params.z;
+    f32 halfLen = iparams.y;
+    f32 radius = iparams.z;
     f32 capOff = position.x >= 0.0f ? halfLen : 0.0f - halfLen;
     float3 lp = float3{normal.x * radius + capOff, normal.y * radius, normal.z * radius};
+    f32 wx = irow0.x * lp.x + irow0.y * lp.y + irow0.z * lp.z + irow0.w;
+    f32 wy = irow1.x * lp.x + irow1.y * lp.y + irow1.z * lp.z + irow1.w;
+    f32 wz = irow2.x * lp.x + irow2.y * lp.y + irow2.z * lp.z + irow2.w;
     EdgeOut o;
-    o.pos = mul(d.mvp, float4{lp.x, lp.y, lp.z, 1.0f});
+    o.pos = mul(u.viewproj, float4{wx, wy, wz, 1.0f});
+    o.tint = itint;
     return o;
-}
-
-@shader fragment
-float4 b3_depth_fs(EdgeOut input) {
-    return float4{0.0f, 0.0f, 0.0f, 1.0f};
 }
 
 // hull-edge overlay: thin translucent lines over the solid boxes
@@ -691,12 +743,8 @@ sg_image g_shadow_img;
 sg_view[SHADOW_CASCADES] g_shadow_att;   // one depth attachment per slice
 sg_view g_shadow_tex;      // texture view over the whole array
 sg_sampler g_shadow_smp;   // comparison sampler
-sg_pipeline g_pip_depth_ns;   // spheres (non-indexed)
-sg_pipeline g_pip_depth_cap;  // capsules (non-indexed)
 float4x4[SHADOW_CASCADES] g_light_clip;   // world -> light clip (depth pass)
 float4x4[SHADOW_CASCADES] g_light_mat;    // world -> shadow texture space
-float3[SHADOW_CASCADES] g_cascade_centre; // fitted sphere, for culling
-f32[SHADOW_CASCADES] g_cascade_radius;
 f32[SHADOW_CASCADES] g_cascade_far;       // far view depth of each cascade
 
 // Orthographic projection, column-major, matching linear.mc's
@@ -806,8 +854,6 @@ void fit_cascade(i32 index, f32 nearZ, f32 farZ) {
         if d > radius { radius = d; }
     }
     if radius < 0.5f { radius = 0.5f; }
-    g_cascade_centre[index] = centre;
-    g_cascade_radius[index] = radius;
 
     // The light eye sits CASTER_MARGIN in front of the sphere, and the
     // depth range ends at its back face: casters up to CASTER_MARGIN above
@@ -860,11 +906,16 @@ void update_light_matrix() {
 
 sg_pipeline g_pip_sky;
 sg_buffer g_sky_vbuf;
-sg_pipeline g_pip_sph;
-sg_pipeline g_pip_sph_mirror;
-sg_pipeline g_pip_cap;
 sg_buffer g_sph_vbuf;
 sg_buffer g_cap_vbuf;
+
+// Solids. Meshes and spheres share a pipeline; capsules size themselves
+// in the shader and need their own.
+sg_pipeline g_pip_inst;
+sg_pipeline g_pip_inst_mirror;
+sg_pipeline g_pip_inst_cap;
+sg_pipeline g_pip_inst_depth;
+sg_pipeline g_pip_inst_depth_cap;
 
 // Column-major model matrix: translate * rotate(q) * scale(s), with an
 // optional body-local offset (rotated by q) for baked-transform hulls.

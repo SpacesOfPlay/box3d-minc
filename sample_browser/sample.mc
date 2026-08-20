@@ -709,9 +709,16 @@ i32 find_sample(str category, str name) {
     return 0;
 }
 
+// upstream ~Sample destroys the world after the derived destructor has
+// run, so a sample's teardown still sees live bodies and joints.
 void load_sample(i32 index, bool restart) {
-    if g_sample_loaded && g_samples[g_sample].destroy != null {
-        g_samples[g_sample].destroy();
+    if g_sample_loaded {
+        if g_samples[g_sample].destroy != null {
+            g_samples[g_sample].destroy();
+        }
+        // release mesh references before the shapes are destroyed
+        adapter_reset();
+        b3DestroyWorld(g_world);
     }
     g_sample = index;
     // upstream reseeds in the Sample constructor
@@ -730,14 +737,13 @@ void load_sample(i32 index, bool restart) {
     g_sample_time = 0.0f;
     g_mouse_force_scale = 100.0f;
     g_launch_speed_scale = DEFAULT_LAUNCH_SPEED_SCALE;
+    cam_draw_distance = CAM_VIEW_DISTANCE;
     // Each sample gets a fresh world, so shape ids restart: a stale
     // ground id from the previous sample would match whatever is
     // created first here and shade it as ground. Only a sample that
     // asks for it gets the grid.
     g_ground_shape_valid = false;
     if g_single_threaded { g_workers = 1; }
-    // release mesh references before the shapes are destroyed
-    adapter_reset();
     b3WorldDef wd = b3DefaultWorldDef();
     wd.workerCount = g_workers;
     wd.enableSleep = g_enable_sleep;

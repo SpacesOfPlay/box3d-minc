@@ -47,7 +47,19 @@ import sample_collision;
 import sample_mesh;
 
 void init() {
-    sg_setup(&sg_desc{ .environment = sglue_environment(), .logger = sglue_logger() });
+    // A cached mesh takes two buffers, vertices and edges, so a full
+    // cache is 2 * MESH_CACHE_MAX. The fixed ones on top are the sphere
+    // and capsule impostors, the sky triangle, the overlay line buffer,
+    // the edge corners and the instance stream, plus two for sokol_imgui
+    // — eight, and the rest of the slack absorbs any added later.
+    // sokol's default pool is 128, which Joints/Gear Lift overruns at 74
+    // live meshes: sg_make_buffer starts handing back invalid ids and the
+    // first bind of one faults.
+    sg_setup(&sg_desc{
+        .environment = sglue_environment(),
+        .logger = sglue_logger(),
+        .buffer_pool_size = MESH_CACHE_MAX * 2 + 32,
+    });
     simgui_setup(&simgui_desc_t{});
     gui_apply_style();
 
@@ -63,6 +75,12 @@ void init() {
     g_workers = cores / 2;
     if g_workers < 1 { g_workers = 1; }
     if g_workers > 8 { g_workers = 8; }
+    when os(wasm) {
+        // Browser thread wakes are pricier than native and the sample
+        // scenes cap near four workers; past that the extra spinners
+        // cost more than they add.
+        if g_workers > 4 { g_workers = 4; }
+    }
     // Upstream opens a first run on the replay viewer, which needs mesh
     // shapes and 3D text; without it, its persisted default is sorted
     // index 0. Named rather than numbered so adding a sample cannot
@@ -77,8 +95,11 @@ void init() {
     g_sky_vbuf = sg_make_buffer(&sg_buffer_desc{
         .data.ptr = &skyVerts, .data.size = sizeof(skyVerts) });
 
-    sg_shader shd = sokol_make_shader(&b3_vs_shader, &b3_fs_shader);
     sg_shader eshd = sokol_make_shader(&b3_edge_vs_shader, &b3_edge_fs_shader);
+    // one InstRec per shape, refilled every frame
+    g_inst_vbuf = sg_make_buffer(&sg_buffer_desc{
+        .size = cast(i64, INST_MAX * INST_STRIDE),
+        .usage.stream_update = true });
     // debug channel: a stream-updated line buffer
     g_dbg_vbuf = sg_make_buffer(&sg_buffer_desc{
         .size = cast(i64, DBG_VERT_MAX * DBG_FLOATS_PER_VERT * 4),
@@ -139,13 +160,23 @@ void init() {
         .depth.write_enabled = false,
     });
 
-    // spheres draw non-indexed; a pipeline's index_type must match its
-    // bindings (the Metal backend validates this), hence a twin
-    // pipeline with SG_INDEXTYPE_NONE
-    g_pip_sph = sg_make_pipeline(&sg_pipeline_desc{
-        .shader = shd,
+    // Solids: buffer 0 is the shape mesh, buffer 1 the instance stream.
+    sg_shader ishd = sokol_make_shader(&b3_inst_vs_shader, &b3_fs_shader);
+    g_pip_inst = sg_make_pipeline(&sg_pipeline_desc{
+        .shader = ishd,
+        .layout.buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE,
         .layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3,
         .layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT3,
+        .layout.attrs[2].buffer_index = 1,
+        .layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[3].buffer_index = 1,
+        .layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[4].buffer_index = 1,
+        .layout.attrs[4].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[5].buffer_index = 1,
+        .layout.attrs[5].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[6].buffer_index = 1,
+        .layout.attrs[6].format = SG_VERTEXFORMAT_FLOAT4,
         .index_type = SG_INDEXTYPE_NONE,
         .face_winding = SG_FACEWINDING_CCW,
         .cull_mode = SG_CULLMODE_BACK,
@@ -156,10 +187,21 @@ void init() {
     // upstream gfx/geometry_registry.c: a negative-determinant scale
     // reverses winding, so those draws are front-culled instead.
     // Character / Mover mirrors the stairs (-z) and the torus (-x).
-    g_pip_sph_mirror = sg_make_pipeline(&sg_pipeline_desc{
-        .shader = shd,
+    g_pip_inst_mirror = sg_make_pipeline(&sg_pipeline_desc{
+        .shader = ishd,
+        .layout.buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE,
         .layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3,
         .layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT3,
+        .layout.attrs[2].buffer_index = 1,
+        .layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[3].buffer_index = 1,
+        .layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[4].buffer_index = 1,
+        .layout.attrs[4].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[5].buffer_index = 1,
+        .layout.attrs[5].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[6].buffer_index = 1,
+        .layout.attrs[6].format = SG_VERTEXFORMAT_FLOAT4,
         .index_type = SG_INDEXTYPE_NONE,
         .face_winding = SG_FACEWINDING_CCW,
         .cull_mode = SG_CULLMODE_FRONT,
@@ -196,11 +238,22 @@ void init() {
 
     // Depth-only pipelines, one per mesh kind. color_count 0 keeps the
     // pass depth-only. Shadow bias is per-pixel, in b3_fs.
-    sg_shader dshd = sokol_make_shader(&b3_depth_vs_shader, &b3_depth_fs_shader);
-    g_pip_depth_ns = sg_make_pipeline(&sg_pipeline_desc{
+    sg_shader dshd = sokol_make_shader(&b3_inst_depth_vs_shader, &b3_depth_fs_shader);
+    g_pip_inst_depth = sg_make_pipeline(&sg_pipeline_desc{
         .shader = dshd,
+        .layout.buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE,
         .layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3,
         .layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT3,
+        .layout.attrs[2].buffer_index = 1,
+        .layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[3].buffer_index = 1,
+        .layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[4].buffer_index = 1,
+        .layout.attrs[4].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[5].buffer_index = 1,
+        .layout.attrs[5].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[6].buffer_index = 1,
+        .layout.attrs[6].format = SG_VERTEXFORMAT_FLOAT4,
         .index_type = SG_INDEXTYPE_NONE,
         .face_winding = SG_FACEWINDING_CCW,
         .cull_mode = SG_CULLMODE_BACK,
@@ -209,11 +262,22 @@ void init() {
         .depth.compare = SG_COMPAREFUNC_LESS_EQUAL,
         .depth.write_enabled = true,
     });
-    sg_shader dcshd = sokol_make_shader(&b3_cap_depth_vs_shader, &b3_depth_fs_shader);
-    g_pip_depth_cap = sg_make_pipeline(&sg_pipeline_desc{
+    sg_shader dcshd = sokol_make_shader(&b3_inst_cap_depth_vs_shader, &b3_depth_fs_shader);
+    g_pip_inst_depth_cap = sg_make_pipeline(&sg_pipeline_desc{
         .shader = dcshd,
+        .layout.buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE,
         .layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3,
         .layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT3,
+        .layout.attrs[2].buffer_index = 1,
+        .layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[3].buffer_index = 1,
+        .layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[4].buffer_index = 1,
+        .layout.attrs[4].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[5].buffer_index = 1,
+        .layout.attrs[5].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[6].buffer_index = 1,
+        .layout.attrs[6].format = SG_VERTEXFORMAT_FLOAT4,
         .index_type = SG_INDEXTYPE_NONE,
         .face_winding = SG_FACEWINDING_CCW,
         .cull_mode = SG_CULLMODE_BACK,
@@ -224,12 +288,23 @@ void init() {
     });
 
     // capsules: the same state, but a vertex shader that sizes the unit
-    // mesh from the half-length/radius uniform
-    sg_shader cshd = sokol_make_shader(&b3_cap_vs_shader, &b3_fs_shader);
-    g_pip_cap = sg_make_pipeline(&sg_pipeline_desc{
+    // mesh from the half-length/radius attribute
+    sg_shader cshd = sokol_make_shader(&b3_inst_cap_vs_shader, &b3_fs_shader);
+    g_pip_inst_cap = sg_make_pipeline(&sg_pipeline_desc{
         .shader = cshd,
+        .layout.buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE,
         .layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3,
         .layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT3,
+        .layout.attrs[2].buffer_index = 1,
+        .layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[3].buffer_index = 1,
+        .layout.attrs[3].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[4].buffer_index = 1,
+        .layout.attrs[4].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[5].buffer_index = 1,
+        .layout.attrs[5].format = SG_VERTEXFORMAT_FLOAT4,
+        .layout.attrs[6].buffer_index = 1,
+        .layout.attrs[6].format = SG_VERTEXFORMAT_FLOAT4,
         .index_type = SG_INDEXTYPE_NONE,
         .face_winding = SG_FACEWINDING_CCW,
         .cull_mode = SG_CULLMODE_BACK,
@@ -258,7 +333,6 @@ void frame() {
         bool restart = g_reset_pending && next == g_sample;
         g_reset_pending = false;
         g_switch_pending = 0;
-        b3DestroyWorld(g_world);
         load_sample(next, restart);
     }
 
@@ -375,8 +449,10 @@ void frame() {
     // --- shadow pass: depth from the light, casters only ---------------
     // One pass per cascade, each into its own slice.
     update_light_matrix();
-    // one walk of the world per frame; the passes replay the list
+    // one walk of the world per frame, then one instance upload; every
+    // pass below draws out of it
     adapter_collect();
+    adapter_build_instances(&viewproj);
     for i32 c = 0; c < SHADOW_CASCADES; c++ {
         sg_begin_pass(&sg_pass{
             .action.depth.load_action = SG_LOADACTION_CLEAR,

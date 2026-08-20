@@ -124,12 +124,29 @@ void shoot(f32 t) {
 i32 main() {
     build_scene();
 
+    // Optional step-count override: `box3d_bench <steps>`. The default
+    // run is 0.18 s, too short for the sampling profiler to collect
+    // anything, so profiling used to need a recompiled copy with a
+    // larger STEP_COUNT. Timing runs are unaffected — no argument keeps
+    // the 1080-step cadence the benchmark table is calibrated on.
+    i32 steps = STEP_COUNT;
+    if get_argc() > 1 {
+        u8* a = get_arg(1);
+        i32 n = 0;
+        i32 k = 0;
+        while *(a + k) >= 48 && *(a + k) <= 57 {
+            n = n * 10 + (cast(i32, *(a + k)) - 48);
+            k = k + 1;
+        }
+        if n > 0 { steps = n; }
+    }
+
     i64 freq = qpf();
     i64 start = qpc();
 
     f32 t = 0.0f;
     f32 next_shot = FIRST_SHOT_AT;
-    for i32 i = 0; i < STEP_COUNT; i++ {
+    for i32 i = 0; i < steps; i++ {
         if t >= next_shot {
             shoot(t);
             next_shot += SHOT_INTERVAL;
@@ -146,7 +163,7 @@ i32 main() {
     b3AABB bounds = b3World_GetBounds(g_world);
     i64 check = cast(i64, bounds.upperBound.y * 1000.0f);
 
-    print("box3d_bench: steps={} check={} time={} us\n", STEP_COUNT, check, us);
-    print("  per-step: {} us\n", us / cast(i64, STEP_COUNT));
+    print("box3d_bench: steps={} check={} time={} us\n", steps, check, us);
+    print("  per-step: {} us\n", us / cast(i64, steps));
     return 0;
 }

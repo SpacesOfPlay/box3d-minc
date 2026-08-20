@@ -3,39 +3,6 @@
 //
 import box3d;
 import math;
-// transminc: C #define values surfaced as compile-time configuration
-@define "__x86_64__" 1
-@define "NDEBUG" 1
-@define "_MSC_VER" 1900
-@define "KEY_W" 87
-@define "KEY_S" 83
-@define "KEY_A" 65
-@define "KEY_D" 68
-@define "KEY_SPACE" 32
-@define "KEY_LEFT_SHIFT" 340
-@define "B3_ENABLE_VALIDATION" 0
-@define "B3_NULL_INDEX" -1
-@define "B3_HASH_INIT" 5381
-@define "B3_MAX_WORKERS" 32
-@define "B3_MAX_TASKS" 256
-@define "B3_GRAPH_COLOR_COUNT" 24
-@define "B3_CONTACT_MANIFOLD_COUNT_BUCKETS" 8
-@define "B3_MAX_WORLDS" 128
-@define "B3_MAX_MANIFOLD_POINTS" 4
-@define "B3_MAX_SHAPE_CAST_POINTS" 64
-@define "B3_GYROSCOPIC_ITERATIONS" 1
-@define "B3_MAX_HULL_VERTICES" 128
-@define "B3_MAX_HULL_FACES" 128
-@define "B3_MAX_HULL_EDGES" 128
-@define "B3_SHAPE_POWER" 22
-@define "B3_RESTITUTION_ITERATIONS" 1
-@define "B3_DYNAMIC_TREE_VERSION" -7787375179321898166
-@define "B3_HULL_VERSION" -2715301031560262655
-@define "B3_MESH_VERSION" -6066037853393090451
-@define "B3_HEIGHT_FIELD_HOLE" 255
-@define "B3_HEIGHT_FIELD_VERSION" -8423759003537458044
-@define "B3_MAX_COMPOUND_MESH_MATERIALS" 4
-
 type errno_t = i32;
 struct MoverShapeUserData {
     f32 maxPush;
@@ -71,6 +38,7 @@ f32 CharacterMover_m_stopSpeed = 1.0f;
 f32 CharacterMover_m_accelerate = 30.0f;
 f32 CharacterMover_m_friction = 4.0f;
 f32 CharacterMover_m_gravity = 15.0f;
+
 private {
 bool MoverFilterCallback(b3ShapeId shapeId, void* context) {
     var self = cast(CharacterMover*, context);
@@ -82,12 +50,13 @@ bool MoverFilterCallback(b3ShapeId shapeId, void* context) {
     return true;
 }
 }
+
 void CharacterMover_Initialize(CharacterMover* self, Sample* sample, b3Pos position) {
     self.m_sample = sample;
     self.m_transform.p = position;
     self.m_transform.q = b3Quat_identity;
     self.m_velocity = b3Vec3{0.0f, 0.0f, 0.0f};
-    self.m_capsule = b3Capsule{b3Vec3{0.0f, -0.5f, 0.0f}, b3Vec3{0.0f, 0.5f, 0.0f}, 0.30000000000000004f};
+    self.m_capsule = b3Capsule{b3Vec3{0.0f, -0.5f, 0.0f}, b3Vec3{0.0f, 0.5f, 0.0f}, 0.3f};
     self.m_planeCount = 0;
     self.m_totalIterations = 0;
     self.m_pogoVelocity = 0.0f;
@@ -96,6 +65,7 @@ void CharacterMover_Initialize(CharacterMover* self, Sample* sample, b3Pos posit
     self.m_ignoreShapeIds = null;
     self.m_ignoreCount = 0;
 }
+
 private {
 bool PlaneResultFcn(b3ShapeId shapeId, b3PlaneResult* planeResults, i32 planeCount, void* context) {
     if MoverFilterCallback(shapeId, context) == false {
@@ -110,13 +80,22 @@ bool PlaneResultFcn(b3ShapeId shapeId, b3PlaneResult* planeResults, i32 planeCou
         clipVelocity = userData.clipVelocity;
     }
     for i32 i = 0; i < planeCount && self.m_planeCount < CharacterMover_m_planeCapacity; ++i {
-        self.m_planes[self.m_planeCount] = b3CollisionPlane{.plane = planeResults[i].plane, .pushLimit = maxPush, .push = 0.0f, .clipVelocity = clipVelocity};
-        self.m_planeExtras[self.m_planeCount] = PlaneExtra{.point = b3OffsetPos(self.m_transform.p, planeResults[i].point), .shapeId = shapeId};
+        self.m_planes[self.m_planeCount] = b3CollisionPlane{
+            .plane = planeResults[i].plane,
+            .pushLimit = maxPush,
+            .push = 0.0f,
+            .clipVelocity = clipVelocity,
+        };
+        self.m_planeExtras[self.m_planeCount] = PlaneExtra{
+            .point = b3OffsetPos(self.m_transform.p, planeResults[i].point),
+            .shapeId = shapeId,
+        };
         self.m_planeCount += 1;
     }
     return true;
 }
 }
+
 void CharacterMover_SolveMove(CharacterMover* self, f32 timeStep, b3Vec3 forward, b3Vec3 right, b3Vec2 throttle, bool clipVelocity) {
     f32 speed = b3Length(self.m_velocity);
     if speed < CharacterMover_m_minSpeed {
@@ -167,7 +146,7 @@ void CharacterMover_SolveMove(CharacterMover* self, f32 timeStep, b3Vec3 forward
     } else {
         self.m_onGround = true;
         f32 pogoCurrentLength = rayResult.fraction * rayLength;
-        f32 zeta = 0.7000000000000001f;
+        f32 zeta = 0.7f;
         f32 hertz = 4.0f;
         f32 omega = 2.0f * 3.14159265359f * hertz;
         f32 omegaH = omega * timeStep;
@@ -176,8 +155,18 @@ void CharacterMover_SolveMove(CharacterMover* self, f32 timeStep, b3Vec3 forward
     }
     b3Pos startPosition = self.m_transform.p;
     b3Pos target = op_add_b3Pos_b3Vec3(op_add_b3Pos_b3Vec3(self.m_transform.p, op_mul_float_b3Vec3(timeStep, self.m_velocity)), op_mul_float_b3Vec3(timeStep, op_mul_float_b3Vec3(self.m_pogoVelocity, b3Vec3_axisY)));
-    var moverFilter = b3QueryFilter{.categoryBits = 1, .maskBits = cast(u64, ~0), .id = 1, .name = "mover_collide"};
-    var castFilter = b3QueryFilter{.categoryBits = 1, .maskBits = cast(u64, ~2), .id = 1, .name = "mover_cast"};
+    var moverFilter = b3QueryFilter{
+        .categoryBits = 1,
+        .maskBits = cast(u64, ~0),
+        .id = 1,
+        .name = "mover_collide",
+    };
+    var castFilter = b3QueryFilter{
+        .categoryBits = 1,
+        .maskBits = cast(u64, ~2),
+        .id = 1,
+        .name = "mover_cast",
+    };
     self.m_totalIterations = 0;
     f32 tolerance = 0.01f;
     for i32 iteration = 0; iteration < 5; ++iteration {
@@ -229,6 +218,7 @@ void CharacterMover_SolveMove(CharacterMover* self, f32 timeStep, b3Vec3 forward
         self.m_velocity = op_mul_float_b3Vec3(1.0f / timeStep, op_sub_b3Pos_b3Pos(self.m_transform.p, startPosition));
     }
 }
+
 void CharacterMover_Step(CharacterMover* self, b3ShapeId* ignoreShapes, i32 ignoreCount, bool clipVelocity) {
     self.m_ignoreShapeIds = ignoreShapes;
     self.m_ignoreCount = ignoreCount;

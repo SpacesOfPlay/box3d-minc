@@ -42,6 +42,10 @@ f32 cam_yaw;          // radians, around Y
 f32 cam_pitch;        // radians, camera-frame X
 f32 cam_radius;       // meters from pivot
 f32 cam_speed = 10.0f;
+// upstream drawDistance: cull box half extent around the eye, meters.
+// Separate from CAM_VIEW_DISTANCE, which is the far plane / zoom cap.
+// Reset on sample load; a sample may pin a shorter one.
+f32 cam_draw_distance = CAM_VIEW_DISTANCE;
 float3 cam_right;
 float3 cam_up;
 float3 cam_forward;   // pivot -> eye

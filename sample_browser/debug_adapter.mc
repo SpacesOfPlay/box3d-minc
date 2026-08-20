@@ -33,7 +33,7 @@ f32 g_dbg_axis_scale = 1.0f;
 // upstream View menu inputs (sample.cpp:1659). A joint marker is about
 // 0.1 units across at jointScale 1.
 f32 g_dbg_joint_scale = 1.0f;
-f32 g_dbg_force_scale;
+f32 g_dbg_force_scale = 1.0f;   // b3DefaultDebugDraw's default
 
 // --- mesh cache ------------------------------------------------------
 //
@@ -639,7 +639,7 @@ i32 compound_draw_stats(i32* total) {
 
 AdapterShape[ADAPTER_POOL_MAX] g_ashapes;
 i32 g_ashape_high;       // high-water mark of slots ever used
-i32 g_ashape_free;       // head of the free list, -1 when empty
+i32 g_ashape_free = -1;  // head of the free list, -1 when empty
 i32 g_ashape_live;
 
 void adapter_pool_init() {
@@ -1393,9 +1393,8 @@ b3DebugDraw adapter_make_debug_draw() {
     d.jointScale = g_dbg_joint_scale;
     d.forceScale = g_dbg_force_scale;
     // upstream Camera::DrawBounds (sample.cpp:490): a cube of the draw
-    // distance about the eye. Box3D uses it to pick the draw set;
-    // b3DefaultDebugDraw defaults to +-100 m.
-    f32 h = CAM_VIEW_DISTANCE;
+    // distance about the eye. Box3D uses it to pick the draw set.
+    f32 h = cam_draw_distance;
     d.drawingBounds = b3AABB{
         b3Pos{cam_eye.x - h, cam_eye.y - h, cam_eye.z - h},
         b3Pos{cam_eye.x + h, cam_eye.y + h, cam_eye.z + h}};
@@ -1543,224 +1542,250 @@ float4 adraw_params(AdapterDraw* d) {
 
 // --- passes ----------------------------------------------------------
 //
-// These replay the collected list, once per shadow cascade and once lit.
-// The vertex buffer is rebound only when the mesh changes.
+// One walk of the collected list per frame fills a stream buffer with an
+// InstRec per shape, grouped into buckets that share a pipeline, a mesh
+// and a cull mode. Each pass then draws one call per bucket.
 
-// Light-space cull: outside the fitted region sideways, above the near
-// plane, or below the region.
-bool adraw_cascade_skips(i32 index, AdapterDraw* d) {
-    f32 e = d.bound;
-    f32 r = g_cascade_radius[index];
-    float3 c = g_cascade_centre[index];
-    float3 sun = float3{0.4880f, 0.7807f, 0.3904f};
-    f32 dx = d.xf.p.x - c.x;
-    f32 dy = d.xf.p.y - c.y;
-    f32 dz = d.xf.p.z - c.z;
-    f32 h = dx * sun.x + dy * sun.y + dz * sun.z;
-    if h > 2.0f * r + e { return true; }
-    if h < 0.0f - (r + e) { return true; }
-    f32 lateral2 = dx * dx + dy * dy + dz * dz - h * h;
-    f32 reach = r + e;
-    return lateral2 > reach * reach;
+const i32 ICLS_MESH = 0;
+const i32 ICLS_SPHERE = 1;
+const i32 ICLS_CAPSULE = 2;
+
+// Instances that survived the camera cull sit at the front of the
+// bucket, so the lit pass draws the first `vis` and the shadow passes,
+// which the camera frustum does not bound, draw all `count`.
+struct IBucket {
+    i32 cls;
+    i32 mesh;       // mesh cache slot for ICLS_MESH, -1 otherwise
+    bool mirror;    // negative-determinant scale, drawn front-culled
+    bool casts;     // not the ground, so the shadow passes draw it
+    i32 start;
+    i32 count;
+    i32 vis;
+    i32 fill;       // cursors while grouping: visible up, culled down
+    i32 fillBack;
 }
 
-void adapter_depth_mesh(i32 cascade, AdapterDraw* d, i32* curMesh) {
-    if d.mesh != *curMesh {
-        sg_apply_bindings(&sg_bindings{ .vertex_buffers[0] = g_meshes[d.mesh].vbuf });
-        *curMesh = d.mesh;
+// Geometry slots: one per cached mesh, plus the sphere and capsule
+// impostors. Every bucket is one of these crossed with the two flags,
+// so a bucket is found by direct index rather than a scan.
+const i32 IGEOM_SPHERE = MESH_CACHE_MAX;
+const i32 IGEOM_CAPSULE = MESH_CACHE_MAX + 1;
+const i32 IGEOM_MAX = MESH_CACHE_MAX + 2;
+const i32 IBUCKET_MAX = IGEOM_MAX * 4;
+// every record plus every compound child it can expand to
+const i32 INST_MAX = ADAPTER_DRAW_MAX + ACHILD_MAX;
+const i32 INST_STRIDE = 80;      // sizeof(InstRec)
+
+IBucket[IBUCKET_MAX] g_ibuckets;
+i32 g_ibucket_count;
+i32[IBUCKET_MAX] g_ibucket_of;   // key -> bucket index, -1 when unused
+InstRec[INST_MAX] g_inst_walk;   // collection order
+i32[INST_MAX] g_inst_bucket;
+InstRec[INST_MAX] g_inst;        // grouped by bucket, the upload image
+i32 g_inst_count;
+i32 g_inst_dropped;
+i32 g_inst_mirror;               // instances in mirrored buckets
+i32 g_inst_caps;                 // instances in capsule buckets
+sg_buffer g_inst_vbuf;
+
+i32 ibucket_find(i32 cls, i32 mesh, bool mirror, bool casts) {
+    i32 geom = mesh;
+    if cls == ICLS_SPHERE { geom = IGEOM_SPHERE; }
+    if cls == ICLS_CAPSULE { geom = IGEOM_CAPSULE; }
+    if geom < 0 || geom >= IGEOM_MAX { return -1; }
+    i32 key = geom * 4;
+    if mirror { key += 1; }
+    if casts { key += 2; }
+    if g_ibucket_of[key] >= 0 { return g_ibucket_of[key]; }
+
+    i32 n = g_ibucket_count;
+    IBucket* b = &g_ibuckets[n];
+    b.cls = cls;
+    b.mesh = mesh;
+    b.mirror = mirror;
+    b.casts = casts;
+    b.start = 0;
+    b.count = 0;
+    b.vis = 0;
+    b.fill = 0;
+    b.fillBack = 0;
+    g_ibucket_of[key] = n;
+    g_ibucket_count++;
+    return n;
+}
+
+void inst_emit(AdapterDraw* d, i32 cls, bool visible) {
+    if g_inst_count >= INST_MAX { g_inst_dropped++; return; }
+    i32 mesh = cls == ICLS_MESH ? d.mesh : -1;
+    bool mirror = cls == ICLS_MESH && adraw_mirrored(d);
+    // the ground receives but never casts
+    bool casts = d.gridCell == 0.0f;
+    i32 bi = ibucket_find(cls, mesh, mirror, casts);
+    if bi < 0 { g_inst_dropped++; return; }
+
+    float4x4 m = adraw_model(d);
+    f32* e = cast(f32*, &m);
+    InstRec* r = &g_inst_walk[g_inst_count];
+    r.row0 = float4{e[0], e[4], e[8], e[12]};
+    r.row1 = float4{e[1], e[5], e[9], e[13]};
+    r.row2 = float4{e[2], e[6], e[10], e[14]};
+    r.tint = d.tint;
+    r.params = adraw_params(d);
+    // low bit carries visibility into the grouping pass
+    g_inst_bucket[g_inst_count] = bi * 2 + (visible ? 1 : 0);
+    g_ibuckets[bi].count++;
+    if visible { g_ibuckets[bi].vis++; }
+    g_inst_count++;
+    if mirror { g_inst_mirror++; }
+    if cls == ICLS_CAPSULE { g_inst_caps++; }
+}
+
+i32 inst_class(i32 kind) {
+    if kind == ASHAPE_SPHERE { return ICLS_SPHERE; }
+    if kind == ASHAPE_CAPSULE { return ICLS_CAPSULE; }
+    if kind == ASHAPE_MESH { return ICLS_MESH; }
+    return -1;
+}
+
+// Compound children are culled against the camera here, as the lit pass
+// used to; they still reach the shadow passes, which the camera frustum
+// does not bound.
+void adapter_build_instances(float4x4* viewproj) {
+    for i32 k = 0; k < IBUCKET_MAX; k++ { g_ibucket_of[k] = -1; }
+    g_ibucket_count = 0;
+    g_inst_count = 0;
+    g_inst_dropped = 0;
+    g_inst_mirror = 0;
+    g_inst_caps = 0;
+    g_ccd_frame = 0;
+
+    for i32 i = 0; i < g_adraw_count; i++ {
+        AdapterDraw* d = &g_adraws[i];
+        if d.kind == ASHAPE_COMPOUND {
+            for i32 c = 0; c < d.childCount; c++ {
+                AdapterChild* ch = &g_achildren[d.childStart + c];
+                i32 cls = inst_class(ch.kind);
+                if cls < 0 { continue; }
+                AdapterDraw cd = achild_draw(d, ch);
+                cd.bound = hull_child_bound(ch);
+                bool visible = !adraw_view_skips(viewproj, &cd);
+                if visible { g_ccd_frame++; }
+                inst_emit(&cd, cls, visible);
+            }
+            continue;
+        }
+        i32 cls = inst_class(d.kind);
+        if cls < 0 { continue; }
+        inst_emit(d, cls, true);
     }
-    PerDraw pd;
-    pd.model = adraw_model(d);
-    pd.mvp = mul(g_light_clip[cascade], pd.model);
-    pd.tint = float4{0.0f, 0.0f, 0.0f, 1.0f};
-    pd.params = float4{0.0f, 0.0f, 0.0f, 0.0f};
-    sg_apply_uniforms(0, &sg_range{ .ptr = &pd, .size = sizeof(pd) });
-    sg_draw(0, g_meshes[d.mesh].nverts, 1);
+    g_compound_children_drawn = g_ccd_frame;
+
+    if g_inst_count == 0 { return; }
+    i32 off = 0;
+    for i32 b = 0; b < g_ibucket_count; b++ {
+        g_ibuckets[b].start = off;
+        g_ibuckets[b].fill = off;
+        off += g_ibuckets[b].count;
+        g_ibuckets[b].fillBack = off - 1;
+    }
+    for i32 i = 0; i < g_inst_count; i++ {
+        IBucket* b = &g_ibuckets[g_inst_bucket[i] / 2];
+        if (g_inst_bucket[i] & 1) != 0 {
+            g_inst[b.fill] = g_inst_walk[i];
+            b.fill++;
+        } else {
+            g_inst[b.fillBack] = g_inst_walk[i];
+            b.fillBack--;
+        }
+    }
+    // sokol allows one update per stream buffer per frame, so every pass
+    // draws out of this one upload
+    sg_update_buffer(g_inst_vbuf, &sg_range{
+        .ptr = &g_inst, .size = cast(i64, g_inst_count * INST_STRIDE) });
+}
+
+sg_buffer ibucket_vbuf(IBucket* b) {
+    if b.cls == ICLS_SPHERE { return g_sph_vbuf; }
+    if b.cls == ICLS_CAPSULE { return g_cap_vbuf; }
+    return g_meshes[b.mesh].vbuf;
+}
+
+i32 ibucket_nverts(IBucket* b) {
+    if b.cls == ICLS_SPHERE { return g_sph_nverts; }
+    if b.cls == ICLS_CAPSULE { return g_cap_nverts; }
+    return g_meshes[b.mesh].nverts;
+}
+
+void ibucket_draw(IBucket* b, bool lit) {
+    i32 n = lit ? b.vis : b.count;
+    if n == 0 { return; }
+    if lit {
+        sg_apply_bindings(&sg_bindings{
+            .vertex_buffers[0] = ibucket_vbuf(b),
+            .vertex_buffers[1] = g_inst_vbuf,
+            .vertex_buffer_offsets[1] = b.start * INST_STRIDE,
+            .views[0] = g_shadow_tex,
+            .samplers[0] = g_shadow_smp });
+    } else {
+        sg_apply_bindings(&sg_bindings{
+            .vertex_buffers[0] = ibucket_vbuf(b),
+            .vertex_buffers[1] = g_inst_vbuf,
+            .vertex_buffer_offsets[1] = b.start * INST_STRIDE });
+    }
+    sg_draw(0, ibucket_nverts(b), n);
 }
 
 void adapter_draw_depth(i32 cascade) {
-    // hull meshes
-    sg_apply_pipeline(g_pip_depth_ns);
-    i32 curMesh = -1;
-    for i32 i = 0; i < g_adraw_count; i++ {
-        AdapterDraw* d = &g_adraws[i];
-        if d.kind == ASHAPE_COMPOUND {
-            if d.gridCell > 0.0f { continue; }
-            if adraw_cascade_skips(cascade, d) { continue; }
-            for i32 c = 0; c < d.childCount; c++ {
-                AdapterChild* ch = &g_achildren[d.childStart + c];
-                if ch.kind != ASHAPE_MESH { continue; }
-                AdapterDraw cd = achild_draw(d, ch);
-                cd.bound = hull_child_bound(ch);
-                if adraw_cascade_skips(cascade, &cd) { continue; }
-                adapter_depth_mesh(cascade, &cd, &curMesh);
-            }
-            continue;
-        }
-        if d.kind != ASHAPE_MESH { continue; }
-        // the ground receives but never casts
-        if d.gridCell > 0.0f { continue; }
-        if adraw_cascade_skips(cascade, d) { continue; }
-        adapter_depth_mesh(cascade, d, &curMesh);
+    if g_inst_count == 0 { return; }
+    InstPass ip;
+    ip.viewproj = g_light_clip[cascade];
+
+    sg_apply_pipeline(g_pip_inst_depth);
+    sg_apply_uniforms(0, &sg_range{ .ptr = &ip, .size = sizeof(ip) });
+    for i32 i = 0; i < g_ibucket_count; i++ {
+        IBucket* b = &g_ibuckets[i];
+        if !b.casts || b.cls == ICLS_CAPSULE { continue; }
+        ibucket_draw(b, false);
     }
 
-    // spheres
-    sg_apply_bindings(&sg_bindings{ .vertex_buffers[0] = g_sph_vbuf });
-    for i32 i = 0; i < g_adraw_count; i++ {
-        AdapterDraw* d = &g_adraws[i];
-        if d.kind == ASHAPE_COMPOUND {
-            if adraw_cascade_skips(cascade, d) { continue; }
-            for i32 c = 0; c < d.childCount; c++ {
-                AdapterChild* ch = &g_achildren[d.childStart + c];
-                if ch.kind != ASHAPE_SPHERE { continue; }
-                AdapterDraw cd = achild_draw(d, ch);
-                PerDraw pd;
-                pd.model = adraw_model(&cd);
-                pd.mvp = mul(g_light_clip[cascade], pd.model);
-                pd.tint = float4{0.0f, 0.0f, 0.0f, 1.0f};
-                pd.params = float4{0.0f, 0.0f, 0.0f, 0.0f};
-                sg_apply_uniforms(0, &sg_range{ .ptr = &pd, .size = sizeof(pd) });
-                sg_draw(0, g_sph_nverts, 1);
-            }
-            continue;
-        }
-        if d.kind != ASHAPE_SPHERE { continue; }
-        if adraw_cascade_skips(cascade, d) { continue; }
-        PerDraw pd;
-        pd.model = adraw_model(d);
-        pd.mvp = mul(g_light_clip[cascade], pd.model);
-        pd.tint = float4{0.0f, 0.0f, 0.0f, 1.0f};
-        pd.params = float4{0.0f, 0.0f, 0.0f, 0.0f};
-        sg_apply_uniforms(0, &sg_range{ .ptr = &pd, .size = sizeof(pd) });
-        sg_draw(0, g_sph_nverts, 1);
+    if g_inst_caps == 0 { return; }
+    sg_apply_pipeline(g_pip_inst_depth_cap);
+    sg_apply_uniforms(0, &sg_range{ .ptr = &ip, .size = sizeof(ip) });
+    for i32 i = 0; i < g_ibucket_count; i++ {
+        IBucket* b = &g_ibuckets[i];
+        if !b.casts || b.cls != ICLS_CAPSULE { continue; }
+        ibucket_draw(b, false);
     }
-
-    // capsules
-    sg_apply_pipeline(g_pip_depth_cap);
-    sg_apply_bindings(&sg_bindings{ .vertex_buffers[0] = g_cap_vbuf });
-    for i32 i = 0; i < g_adraw_count; i++ {
-        AdapterDraw* d = &g_adraws[i];
-        if d.kind != ASHAPE_CAPSULE { continue; }
-        if adraw_cascade_skips(cascade, d) { continue; }
-        PerDraw pd;
-        pd.model = adraw_model(d);
-        pd.mvp = mul(g_light_clip[cascade], pd.model);
-        pd.tint = float4{0.0f, 0.0f, 0.0f, 1.0f};
-        pd.params = adraw_params(d);
-        sg_apply_uniforms(0, &sg_range{ .ptr = &pd, .size = sizeof(pd) });
-        sg_draw(0, g_cap_nverts, 1);
-    }
-}
-
-void adapter_draw_one(float4x4* viewproj, AdapterDraw* d) {
-    PerDraw pd;
-    pd.model = adraw_model(d);
-    pd.mvp = mul(*viewproj, pd.model);
-    pd.tint = d.tint;
-    pd.params = adraw_params(d);
-    sg_apply_uniforms(0, &sg_range{ .ptr = &pd, .size = sizeof(pd) });
 }
 
 void adapter_draw_lit(float4x4* viewproj, ShadowUni* shu) {
-    g_ccd_frame = 0;
-    // Two passes: back-culled, then the mirrored ones front-culled.
+    if g_inst_count == 0 { return; }
+    InstPass ip;
+    ip.viewproj = *viewproj;
+
+    // back-culled, then the mirrored ones front-culled
     for i32 pass = 0; pass < 2; pass++ {
         bool mirror = pass == 1;
-        // non-indexed, so they ride the sphere pipeline
-        sg_apply_pipeline(mirror ? g_pip_sph_mirror : g_pip_sph);
-        i32 curMesh = -1;
-        bool bound = false;
-        for i32 i = 0; i < g_adraw_count; i++ {
-            AdapterDraw* d = &g_adraws[i];
-            if d.kind == ASHAPE_COMPOUND {
-                for i32 c = 0; c < d.childCount; c++ {
-                    AdapterChild* ch = &g_achildren[d.childStart + c];
-                    if ch.kind != ASHAPE_MESH { continue; }
-                    AdapterDraw cd = achild_draw(d, ch);
-                    if adraw_mirrored(&cd) != mirror { continue; }
-                    cd.bound = hull_child_bound(ch);
-                    if adraw_view_skips(viewproj, &cd) { continue; }
-                    g_ccd_frame++;
-                    if cd.mesh != curMesh || !bound {
-                        sg_apply_bindings(&sg_bindings{ .vertex_buffers[0] = g_meshes[cd.mesh].vbuf,
-                                                        .views[0] = g_shadow_tex,
-                                                        .samplers[0] = g_shadow_smp });
-                        sg_apply_uniforms(1, &sg_range{ .ptr = shu, .size = sizeof(*shu) });
-                        curMesh = cd.mesh;
-                        bound = true;
-                    }
-                    adapter_draw_one(viewproj, &cd);
-                    sg_draw(0, g_meshes[cd.mesh].nverts, 1);
-                }
-                continue;
-            }
-            if d.kind != ASHAPE_MESH { continue; }
-            if adraw_mirrored(d) != mirror { continue; }
-            if d.mesh != curMesh || !bound {
-                sg_apply_bindings(&sg_bindings{ .vertex_buffers[0] = g_meshes[d.mesh].vbuf,
-                                                .views[0] = g_shadow_tex,
-                                                .samplers[0] = g_shadow_smp });
-                sg_apply_uniforms(1, &sg_range{ .ptr = shu, .size = sizeof(*shu) });
-                curMesh = d.mesh;
-                bound = true;
-            }
-            adapter_draw_one(viewproj, d);
-            sg_draw(0, g_meshes[d.mesh].nverts, 1);
+        if mirror && g_inst_mirror == 0 { continue; }
+        sg_apply_pipeline(mirror ? g_pip_inst_mirror : g_pip_inst);
+        sg_apply_uniforms(0, &sg_range{ .ptr = &ip, .size = sizeof(ip) });
+        sg_apply_uniforms(1, &sg_range{ .ptr = shu, .size = sizeof(*shu) });
+        for i32 i = 0; i < g_ibucket_count; i++ {
+            IBucket* b = &g_ibuckets[i];
+            if b.mirror != mirror || b.cls == ICLS_CAPSULE { continue; }
+            ibucket_draw(b, true);
         }
     }
 
-    // spheres — the mesh block above leaves the mirror pipeline bound
-    sg_apply_pipeline(g_pip_sph);
-    sg_apply_bindings(&sg_bindings{ .vertex_buffers[0] = g_sph_vbuf,
-                                    .views[0] = g_shadow_tex,
-                                    .samplers[0] = g_shadow_smp });
+    if g_inst_caps == 0 { return; }
+    sg_apply_pipeline(g_pip_inst_cap);
+    sg_apply_uniforms(0, &sg_range{ .ptr = &ip, .size = sizeof(ip) });
     sg_apply_uniforms(1, &sg_range{ .ptr = shu, .size = sizeof(*shu) });
-    for i32 i = 0; i < g_adraw_count; i++ {
-        AdapterDraw* d = &g_adraws[i];
-        if d.kind == ASHAPE_COMPOUND {
-            for i32 c = 0; c < d.childCount; c++ {
-                AdapterChild* ch = &g_achildren[d.childStart + c];
-                if ch.kind != ASHAPE_SPHERE { continue; }
-                AdapterDraw cd = achild_draw(d, ch);
-                cd.bound = hull_child_bound(ch);
-                if adraw_view_skips(viewproj, &cd) { continue; }
-                g_ccd_frame++;
-                adapter_draw_one(viewproj, &cd);
-                sg_draw(0, g_sph_nverts, 1);
-            }
-            continue;
-        }
-        if d.kind != ASHAPE_SPHERE { continue; }
-        adapter_draw_one(viewproj, d);
-        sg_draw(0, g_sph_nverts, 1);
+    for i32 i = 0; i < g_ibucket_count; i++ {
+        IBucket* b = &g_ibuckets[i];
+        if b.cls != ICLS_CAPSULE { continue; }
+        ibucket_draw(b, true);
     }
-
-    // capsules
-    sg_apply_pipeline(g_pip_cap);
-    sg_apply_bindings(&sg_bindings{ .vertex_buffers[0] = g_cap_vbuf,
-                                    .views[0] = g_shadow_tex,
-                                    .samplers[0] = g_shadow_smp });
-    sg_apply_uniforms(1, &sg_range{ .ptr = shu, .size = sizeof(*shu) });
-    for i32 i = 0; i < g_adraw_count; i++ {
-        AdapterDraw* d = &g_adraws[i];
-        if d.kind == ASHAPE_COMPOUND {
-            for i32 c = 0; c < d.childCount; c++ {
-                AdapterChild* ch = &g_achildren[d.childStart + c];
-                if ch.kind != ASHAPE_CAPSULE { continue; }
-                AdapterDraw cd = achild_draw(d, ch);
-                cd.bound = hull_child_bound(ch);
-                if adraw_view_skips(viewproj, &cd) { continue; }
-                g_ccd_frame++;
-                adapter_draw_one(viewproj, &cd);
-                sg_draw(0, g_cap_nverts, 1);
-            }
-            continue;
-        }
-        if d.kind != ASHAPE_CAPSULE { continue; }
-        adapter_draw_one(viewproj, d);
-        sg_draw(0, g_cap_nverts, 1);
-    }
-    g_compound_children_drawn = g_ccd_frame;
 }
 
 // Upload the line work and draw it in one call.

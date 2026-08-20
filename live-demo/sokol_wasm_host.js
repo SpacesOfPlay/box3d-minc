@@ -56,7 +56,7 @@ SOKOL.stopAudio = async function(fadeMs) {
     SOKOL._saudioWorkletReady = false;
 };
 
-// Audio worklet is async to load; saudio_js_init is sync — preload first.
+// Audio worklet is async to load; saudio_js_init is sync; preload first.
 SOKOL.preloadAudioWorklet = async function(opts) {
     if (typeof AudioContext === 'undefined') {
         console.warn('preloadAudioWorklet: no AudioContext support');
@@ -81,14 +81,18 @@ SOKOL.preloadAudioWorklet = async function(opts) {
 const canvas = document.getElementById('canvas');
 if (!canvas) { SOKOL._initError = new Error('sokol_wasm_host: <canvas id="canvas"> required'); return; }
 const gl = canvas.getContext('webgl2', { antialias: true, alpha: false });
-if (!gl) { SOKOL._initError = new Error('WebGL2 context unavailable — canvas.getContext("webgl2") returned null. Most often the browser has hit its live-WebGL-context limit (~16): close other WebGL/example tabs or restart the browser. Otherwise WebGL2 may be disabled or unsupported in this browser.'); return; }
+if (!gl) { SOKOL._initError = new Error('WebGL2 context unavailable: canvas.getContext("webgl2") returned null. Most often the browser has hit its live-WebGL-context limit (~16): close other WebGL/example tabs or restart the browser. Otherwise WebGL2 may be disabled or unsupported in this browser.'); return; }
 
 // Enable every extension so getParameter works for ext-specific pnames.
-(gl.getSupportedExtensions() || []).forEach(name => gl.getExtension(name));
+// WEBGL_debug_renderer_info is skipped: nothing queries the unmasked
+// strings and enabling it logs a deprecation warning in Firefox.
+(gl.getSupportedExtensions() || []).forEach(name => {
+    if (name !== 'WEBGL_debug_renderer_info') gl.getExtension(name);
+});
 
 // A lost GL context (GPU recycle, driver reset, tab sleep) used to
 // show as a silent black canvas. Surface it loudly; recovery needs
-// a reload — sokol's GL objects don't survive a lost context.
+// a reload; sokol's GL objects don't survive a lost context.
 let glLost = false;
 canvas.addEventListener('webglcontextlost', (e) => {
     e.preventDefault();
@@ -98,7 +102,7 @@ canvas.addEventListener('webglcontextlost', (e) => {
     try { SOKOL.onLog(m + '\n', true); } catch (_) {}
 }, false);
 canvas.addEventListener('webglcontextrestored', () => {
-    const m = 'WebGL context restored — reload the page to re-run the demo.';
+    const m = 'WebGL context restored; reload the page to re-run the demo.';
     console.warn('sokol_wasm_host: ' + m);
     try { SOKOL.onLog(m + '\n', true); } catch (_) {}
 }, false);
@@ -134,7 +138,7 @@ let quitRequested = false;
 let frameCount = 0;
 let instance = null;
 // Re-run support: runFromBytes can be called again (the playground swaps
-// examples without reloading). A new run must cancel the prior rafLoop —
+// examples without reloading). A new run must cancel the prior rafLoop;
 // otherwise two loops stay registered and requestAnimationFrame fires both
 // with the SAME timestamp in one frame, so the instance's _sapp_wasm_frame
 // runs twice and the second call sees dt = (t - t) = 0. sokol's frame-timing
@@ -202,9 +206,9 @@ SOKOL.makeImports = function() {
                 return BigInt(Number(len));
             },
             clock: () => BigInt(Math.round(performance.now() * 1e6)),
-                __wasm_abort: () => { throw new Error('sokol abort() — assertion failed in wasm'); },
+                __wasm_abort: () => { throw new Error('sokol abort(): assertion failed in wasm'); },
             __sys_exit: (code) => {
-                console.error(`__sys_exit(${code}) — wasm requested process exit`);
+                console.error(`__sys_exit(${code}): wasm requested process exit`);
                 quitRequested = true;
                 throw new Error(`__sys_exit(${code})`);
             },
@@ -606,14 +610,110 @@ SOKOL.makeImports = function() {
         sapp: {
             sapp_host_width:  () => canvas.width,
             sapp_host_height: () => canvas.height,
-            // devicePixelRatio scaled by 1000 (the seam divides) — sapp imports
+            // devicePixelRatio scaled by 1000 (the seam divides); sapp imports
             // return integers (BigInt) over the wasm ABI, so a fractional dpr
             // like 1.5 can't be returned directly. Used for dpi_scale so
             // sapp_width() stays the native-pixel framebuffer.
             sapp_host_dpi:    () => Math.round((window.devicePixelRatio || 1) * 1000),
+            // Icon pixels from the wasm (RGBA8) become the page favicon,
+            // matching sokol_app's emscripten backend.
+            sapp_js_set_favicon: v((w, h, pixels) => {
+                const cw = Number(w), ch = Number(h);
+                const c = document.createElement('canvas');
+                c.width = cw; c.height = ch;
+                const g = c.getContext('2d');
+                const img = g.createImageData(cw, ch);
+                img.data.set(new Uint8Array(memory.buffer, Number(pixels), cw * ch * 4));
+                g.putImageData(img, 0, 0);
+                let link = document.getElementById('sokol-app-favicon');
+                if (!link) {
+                    link = document.createElement('link');
+                    link.id = 'sokol-app-favicon';
+                    link.rel = 'shortcut icon';
+                    document.head.appendChild(link);
+                }
+                link.href = c.toDataURL();
+            }),
+            sapp_js_lock_mouse: v((lock) => {
+                if (Number(lock)) {
+                    const pr = canvas.requestPointerLock && canvas.requestPointerLock();
+                    if (pr && pr.catch) pr.catch(() => {});
+                } else if (document.pointerLockElement) {
+                    document.exitPointerLock();
+                }
+            }),
             sapp_host_request_quit: v(()    => { quitRequested = true; }),
             sapp_host_quit_pending: () => quitRequested ? 1 : 0,
             sapp_host_log: v((ptr, len) => console.log('[sokol] ' + readString(ptr, len))),
+        },
+
+        // sokol_fetch host glue. The wasm arm of sokol_fetch.h has no
+        // threads: it calls out here to start a request and we call the
+        // _sfetch_emsc_* exports back when the browser answers. Bytes go
+        // straight into the buffer the C side already allocated, so no
+        // __wasm_alloc round-trip.
+        //
+        // Mirrors the EM_JS bodies in sokol_fetch.h, which are blanked
+        // out of the vendored copy (scripts/blank_emjs.py) because
+        // inline JS is not lexable C.
+        fetch: {
+            sfetch_js_send_head_request: v((slot_id, path_cstr) => {
+                // u32 params of a minc export arrive as BigInt; i32/f32 are the
+                // only plain-number ones
+                const slot = BigInt(slot_id);
+                const path = readCStr(path_cstr);
+                fetch(path, { method: 'HEAD' }).then((response) => {
+                    if (!response.ok) {
+                        SOKOL.instance.exports.sfetch_emsc_failed_http_status(slot, BigInt(response.status));
+                        return;
+                    }
+                    const len = response.headers.get('Content-Length');
+                    // a range request needs the total size up front; without
+                    // Content-Length there is nothing to chunk against
+                    if (len === null) {
+                        SOKOL.instance.exports.sfetch_emsc_failed_other(slot);
+                    } else {
+                        SOKOL.instance.exports.sfetch_emsc_head_response(slot, BigInt(len));
+                    }
+                }).catch((err) => {
+                    console.error(`sokol_fetch: HEAD ${path} failed with: `, err);
+                    SOKOL.instance.exports.sfetch_emsc_failed_other(slot);
+                });
+            }),
+
+            // bytes_to_read != 0 asks for a range, otherwise the whole file
+            sfetch_js_send_get_request: v((slot_id, path_cstr, offset, bytes_to_read, buf_ptr, buf_size) => {
+                // u32 params of a minc export arrive as BigInt; i32/f32 are the
+                // only plain-number ones
+                const slot = BigInt(slot_id);
+                const path = readCStr(path_cstr);
+                const off = Number(offset);
+                const want = Number(bytes_to_read);
+                const dst = Number(buf_ptr);
+                const cap = Number(buf_size);
+                const headers = new Headers();
+                if (want > 0) headers.append('Range', `bytes=${off}-${off + want - 1}`);
+                fetch(path, { method: 'GET', headers }).then((response) => {
+                    if (!response.ok) {
+                        SOKOL.instance.exports.sfetch_emsc_failed_http_status(slot, BigInt(response.status));
+                        return;
+                    }
+                    return response.arrayBuffer().then((data) => {
+                        const bytes = new Uint8Array(data);
+                        if (bytes.length > cap) {
+                            SOKOL.instance.exports.sfetch_emsc_failed_buffer_too_small(slot);
+                            return;
+                        }
+                        // re-read the view: the heap may have grown while the
+                        // request was in flight, detaching any earlier buffer
+                        new Uint8Array(memory.buffer).set(bytes, dst);
+                        SOKOL.instance.exports.sfetch_emsc_get_response(slot, BigInt(want), BigInt(bytes.length));
+                    });
+                }).catch((err) => {
+                    console.error(`sokol_fetch: GET ${path} failed with: `, err);
+                    SOKOL.instance.exports.sfetch_emsc_failed_other(slot);
+                });
+            }),
         },
 
         // sokol_audio host glue.
@@ -631,7 +731,7 @@ SOKOL.makeImports = function() {
                 }
                 if (!SOKOL._saudioCtx) return 0;
                 if (!SOKOL._saudioWorkletReady) {
-                    console.warn('saudio: AudioWorklet module not preloaded — call SOKOL.preloadAudioWorklet() before runFromBytes');
+                    console.warn('saudio: AudioWorklet module not preloaded; call SOKOL.preloadAudioWorklet() before runFromBytes');
                     return 0;
                 }
                 let node;
@@ -792,8 +892,19 @@ function attachEventListeners() {
 
     canvas.addEventListener('mousemove', (ev) => {
         if (!instance) return;
-        instance.exports._sapp_wasm_event_mouse_move(fbX(ev), fbY(ev), BigInt(modsFromEvent(ev)));
+        const dpr = window.devicePixelRatio || 1;
+        instance.exports._sapp_wasm_event_mouse_move(fbX(ev), fbY(ev),
+            ev.movementX * dpr, ev.movementY * dpr, BigInt(modsFromEvent(ev)));
     });
+    // Pointer Lock state changes reach the wasm; a rejected request
+    // (no user gesture) simply leaves the state unlocked.
+    const plChange = () => {
+        if (instance && instance.exports._sapp_wasm_event_mouse_locked) {
+            instance.exports._sapp_wasm_event_mouse_locked(document.pointerLockElement === canvas ? 1 : 0);
+        }
+    };
+    document.addEventListener('pointerlockchange', plChange);
+    document.addEventListener('pointerlockerror', plChange);
     canvas.addEventListener('mousedown', (ev) => {
         if (!instance) return;
         instance.exports._sapp_wasm_event_mouse_button(1, mapMouseButton(ev.button), fbX(ev), fbY(ev), BigInt(modsFromEvent(ev)));
@@ -869,7 +980,7 @@ SOKOL.runFromBytes = async function(bytes) {
         SOKOL._listenersAttached = true;
     }
     // --threads: copy the passive data segment into the shared memory,
-    // first instance only — workers must never re-run it.
+    // first instance only; workers must never re-run it.
     if (inst.exports.__minc_init_data && !SOKOL._didInitData) {
         SOKOL._didInitData = true;
         inst.exports.__minc_init_data();
@@ -886,7 +997,7 @@ SOKOL.run = async function(wasmPath) {
 // --- --threads builds ----------------------------------------------------
 // Dual artifacts: base.threads.wasm when the page is cross-origin
 // isolated, base.wasm otherwise. Workers are pre-spawned and park on
-// Atomics slots — a spinning wasm main never yields the event loop.
+// Atomics slots; a spinning wasm main never yields the event loop.
 SOKOL.threadsAvailable = function() {
     if (new URLSearchParams(location.search).get('threads') === '0') return false;
     if (typeof crossOriginIsolated !== 'undefined' && !crossOriginIsolated) return false;
@@ -939,7 +1050,7 @@ SOKOL._runThreads = async function(url, opts) {
     let mem = null, lastErr = null;
     const stubMod = new Proxy({}, { get: () => (...a) => 0n });
     for (const initial of [64, 256, 1024, 4096]) {
-        // 2GB maximum when the browser allows it — the wasm heap never
+        // 2GB maximum when the browser allows it; the wasm heap never
         // frees, so restart-heavy pages need the headroom.
         let m;
         try { m = new WebAssembly.Memory({ initial, maximum: 32768, shared: true }); }
@@ -975,7 +1086,7 @@ SOKOL._runThreads = async function(url, opts) {
             fv[0] = 0;
             // Bounded: spinning forever here would wedge the tab if the
             // pool is exhausted. On timeout the thread is born dead
-            // (flag pre-set) — the scheduler just runs with fewer
+            // (flag pre-set); the scheduler just runs with fewer
             // workers via its finish-side help-out.
             const deadline = performance.now() + 2000;
             for (;;) {
@@ -983,7 +1094,7 @@ SOKOL._runThreads = async function(url, opts) {
                     const v = views[k];
                     if (Atomics.load(v.i32, 0) === 0) {
                         // One stack per pool slot, reused across every
-                        // thread that slot ever runs — the wasm heap
+                        // thread that slot ever runs; the wasm heap
                         // never frees, so per-thread stacks would leak
                         // 2MB per create (restart-heavy pages OOM'd).
                         if (!v.stack) v.stack = Number(instance.exports.__wasm_alloc(BigInt(STACK)));
@@ -1023,7 +1134,7 @@ SOKOL.runAuto = async function(base, opts) {
 // --- Shader live reload --------------------------------------------------
 // The host recompiles shaders in-browser and pushes translated GLSL into
 // the running instance; it swaps the shader + pipeline in place on the
-// next frame (lib/shader_live.mc wasm arm) — no restart, app state kept.
+// next frame (lib/shader_live.mc wasm arm); no restart, app state kept.
 SOKOL.hasLiveReload = function() {
     return !!(instance && instance.exports && instance.exports.__shader_live_push);
 };

@@ -3,39 +3,6 @@
 //
 import box3d;
 import math;
-// transminc: C #define values surfaced as compile-time configuration
-@define "__x86_64__" 1
-@define "NDEBUG" 1
-@define "_MSC_VER" 1900
-@define "KEY_W" 87
-@define "KEY_S" 83
-@define "KEY_A" 65
-@define "KEY_D" 68
-@define "KEY_SPACE" 32
-@define "KEY_LEFT_SHIFT" 340
-@define "B3_ENABLE_VALIDATION" 0
-@define "B3_NULL_INDEX" -1
-@define "B3_HASH_INIT" 5381
-@define "B3_MAX_WORKERS" 32
-@define "B3_MAX_TASKS" 256
-@define "B3_GRAPH_COLOR_COUNT" 24
-@define "B3_CONTACT_MANIFOLD_COUNT_BUCKETS" 8
-@define "B3_MAX_WORLDS" 128
-@define "B3_MAX_MANIFOLD_POINTS" 4
-@define "B3_MAX_SHAPE_CAST_POINTS" 64
-@define "B3_GYROSCOPIC_ITERATIONS" 1
-@define "B3_MAX_HULL_VERTICES" 128
-@define "B3_MAX_HULL_FACES" 128
-@define "B3_MAX_HULL_EDGES" 128
-@define "B3_SHAPE_POWER" 22
-@define "B3_RESTITUTION_ITERATIONS" 1
-@define "B3_DYNAMIC_TREE_VERSION" -7787375179321898166
-@define "B3_HULL_VERSION" -2715301031560262655
-@define "B3_MESH_VERSION" -6066037853393090451
-@define "B3_HEIGHT_FIELD_HOLE" 255
-@define "B3_HEIGHT_FIELD_VERSION" -8423759003537458044
-@define "B3_MAX_COMPOUND_MESH_MATERIALS" 4
-
 type errno_t = i32;
 // Vendored extraction: samples/sample_character.cpp lines 593-1312,
 // moved verbatim so RigidbodyCharacter is its own translation unit and
@@ -102,23 +69,24 @@ f32 ClosestShapeCastCallback(b3ShapeId shapeId, b3Pos point, b3Vec3 normal, f32 
     return ctx.closestFraction;
 }
 }
-f32 RigidbodyCharacter_SRC = 0.025400000000000002f;
-f32 RigidbodyCharacter_m_walkSpeed = 230.0f * 0.025400000000000002f;
-f32 RigidbodyCharacter_m_runSpeed = 350.0f * 0.025400000000000002f;
-f32 RigidbodyCharacter_m_jumpSpeed = 300.0f * 0.025400000000000002f;
+f32 RigidbodyCharacter_SRC = 0.0254f;
+f32 RigidbodyCharacter_m_walkSpeed = 230.0f * 0.0254f;
+f32 RigidbodyCharacter_m_runSpeed = 350.0f * 0.0254f;
+f32 RigidbodyCharacter_m_jumpSpeed = 300.0f * 0.0254f;
 f32 RigidbodyCharacter_m_maxSlopeAngle = 45.0f;
 f32 RigidbodyCharacter_m_characterGravity = 15.0f;
 f32 RigidbodyCharacter_m_characterMass = 500.0f;
 f32 RigidbodyCharacter_m_jumpCooldownTime = 0.2f;
-f32 RigidbodyCharacter_m_stepUpHeight = 18.0f * 0.025400000000000002f;
-f32 RigidbodyCharacter_m_stepDownHeight = 18.0f * 0.025400000000000002f;
-f32 RigidbodyCharacter_m_skin = 0.095f * 0.025400000000000002f;
+f32 RigidbodyCharacter_m_stepUpHeight = 18.0f * 0.0254f;
+f32 RigidbodyCharacter_m_stepDownHeight = 18.0f * 0.0254f;
+f32 RigidbodyCharacter_m_skin = 0.095f * 0.0254f;
 f32 RigidbodyCharacter_m_brakePower = 0.2f;
-f32 RigidbodyCharacter_m_surfaceFriction = 0.6000000000000001f;
+f32 RigidbodyCharacter_m_surfaceFriction = 0.6f;
 f32 RigidbodyCharacter_m_airFriction = 0.1f;
-f32 RigidbodyCharacter_m_bodyRadius = 16.0f * 0.025400000000000002f;
-f32 RigidbodyCharacter_m_totalHeight = 72.0f * 0.025400000000000002f;
-f32 RigidbodyCharacter_m_feetHeight = 72.0f * 0.025400000000000002f * 0.5f;
+f32 RigidbodyCharacter_m_bodyRadius = 16.0f * 0.0254f;
+f32 RigidbodyCharacter_m_totalHeight = 72.0f * 0.0254f;
+f32 RigidbodyCharacter_m_feetHeight = 72.0f * 0.0254f * 0.5f;
+
 void RigidbodyCharacter_Initialize(RigidbodyCharacter* self, Sample* sample, b3Pos position) {
     self.m_sample = sample;
     self.m_onGround = false;
@@ -151,7 +119,10 @@ void RigidbodyCharacter_Initialize(RigidbodyCharacter* self, Sample* sample, b3P
         shapeDef.baseMaterial.customColor = cast(u32, b3_colorLimeGreen);
         f32 feetVolume = 8.0f * halfExtX * halfExtY * halfExtZ;
         shapeDef.density = RigidbodyCharacter_m_characterMass * 0.4f / feetVolume;
-        var feetTransform = b3Transform{b3Vec3{0.0f, -RigidbodyCharacter_m_totalHeight * 0.5f + halfExtY, 0.0f}, b3Quat_identity};
+        var feetTransform = b3Transform{
+            b3Vec3{0.0f, -RigidbodyCharacter_m_totalHeight * 0.5f + halfExtY, 0.0f},
+            b3Quat_identity,
+        };
         b3BoxHull feetBox = b3MakeTransformedBoxHull(halfExtX, halfExtY, halfExtZ, feetTransform);
         self.m_feetBoxId = b3CreateHullShape(self.m_bodyId, &shapeDef, &feetBox.base);
     }
@@ -160,7 +131,11 @@ void RigidbodyCharacter_Initialize(RigidbodyCharacter* self, Sample* sample, b3P
         f32 capsuleBottom = -RigidbodyCharacter_m_totalHeight * 0.5f + RigidbodyCharacter_m_feetHeight * 0.5f + capsuleRadius;
         f32 capsuleTop = RigidbodyCharacter_m_totalHeight * 0.5f - capsuleRadius;
         if capsuleTop > capsuleBottom {
-            var capsule = b3Capsule{b3Vec3{0.0f, capsuleBottom, 0.0f}, b3Vec3{0.0f, capsuleTop, 0.0f}, capsuleRadius};
+            var capsule = b3Capsule{
+                b3Vec3{0.0f, capsuleBottom, 0.0f},
+                b3Vec3{0.0f, capsuleTop, 0.0f},
+                capsuleRadius,
+            };
             b3ShapeDef shapeDef = b3DefaultShapeDef();
             shapeDef.baseMaterial.friction = 0.0f;
             shapeDef.baseMaterial.restitution = 0.0f;
@@ -168,13 +143,14 @@ void RigidbodyCharacter_Initialize(RigidbodyCharacter* self, Sample* sample, b3P
             f32 h = capsuleTop - capsuleBottom;
             f32 r = capsuleRadius;
             f32 capsuleVolume = 3.14159265359f * r * r * (h + 4.0f * r / 3.0f);
-            shapeDef.density = RigidbodyCharacter_m_characterMass * 0.6000000000000001f / capsuleVolume;
+            shapeDef.density = RigidbodyCharacter_m_characterMass * 0.6f / capsuleVolume;
             self.m_bodyCapsuleId = b3CreateCapsuleShape(self.m_bodyId, &shapeDef, &capsule);
         }
     }
     self.m_ownShapeCount = b3Body_GetShapes(self.m_bodyId, self.m_ownShapes, 4);
     RigidbodyCharacter_UpdateMassCenter(self, 0.0f);
 }
+
 // --- TraceBody: box shape cast matching s&box's TraceBody ---
 // Casts a box from `from` to `to` with given radius and height scale.
 TraceResult RigidbodyCharacter_TraceBody(RigidbodyCharacter* self, b3Pos from_var, b3Pos to, f32 radiusScale, f32 heightScale) {
@@ -187,7 +163,7 @@ TraceResult RigidbodyCharacter_TraceBody(RigidbodyCharacter* self, b3Pos from_va
     result.startedSolid = false;
     b3Vec3 translation = op_sub_b3Pos_b3Pos(to, from_var);
     f32 translationLen = b3Length(translation);
-    if translationLen < 1.0000000000000002e-6f {
+    if translationLen < 1.0e-6f {
         return result;
     }
     f32 halfW = RigidbodyCharacter_m_bodyRadius * 0.5f * radiusScale;
@@ -228,15 +204,18 @@ TraceResult RigidbodyCharacter_TraceBody(RigidbodyCharacter* self, b3Pos from_va
     }
     return result;
 }
+
 bool RigidbodyCharacter_IsStandableSurface(RigidbodyCharacter* self, b3Vec3 normal) {
     f32 maxSlopeCos = cosf(RigidbodyCharacter_m_maxSlopeAngle * 3.14159265359f / 180.0f);
     return b3Dot(normal, b3Vec3_axisY) >= maxSlopeCos;
 }
+
 // Get feet position from body center position
 b3Pos RigidbodyCharacter_GetFeetPosition(RigidbodyCharacter* self) {
     b3Pos pos = b3Body_GetPosition(self.m_bodyId);
     return b3Pos{pos.x, pos.y - RigidbodyCharacter_m_totalHeight * 0.5f, pos.z};
 }
+
 // --- CategorizeGround: s&box-style box cast with radius shrinking ---
 void RigidbodyCharacter_CategorizeGround(RigidbodyCharacter* self) {
     b3Pos feet = RigidbodyCharacter_GetFeetPosition(self);
@@ -246,7 +225,7 @@ void RigidbodyCharacter_CategorizeGround(RigidbodyCharacter* self) {
     TraceResult tr = RigidbodyCharacter_TraceBody(self, from_var, to, radiusScale, 0.5f);
     while tr.startedSolid || tr.hit && !RigidbodyCharacter_IsStandableSurface(self, tr.normal) {
         radiusScale -= 0.1f;
-        if radiusScale < 0.7000000000000001f {
+        if radiusScale < 0.7f {
             RigidbodyCharacter_UpdateGround(self, false, b3Vec3_axisY);
             DrawLine(from_var, to, MakeColor(b3_colorRed));
             return;
@@ -262,6 +241,7 @@ void RigidbodyCharacter_CategorizeGround(RigidbodyCharacter* self) {
         DrawLine(from_var, to, MakeColor(b3_colorGray));
     }
 }
+
 void RigidbodyCharacter_UpdateGround(RigidbodyCharacter* self, bool onGround, b3Vec3 normal) {
     self.m_onGround = onGround;
     self.m_groundNormal = normal;
@@ -269,6 +249,7 @@ void RigidbodyCharacter_UpdateGround(RigidbodyCharacter* self, bool onGround, b3
         self.m_groundVelocity = b3Vec3_zero;
     }
 }
+
 // --- Reground / StickToGround: snap character to surface when on ground ---
 void RigidbodyCharacter_Reground(RigidbodyCharacter* self, f32 stepSize) {
     if self.m_onGround == 0 {
@@ -281,7 +262,7 @@ void RigidbodyCharacter_Reground(RigidbodyCharacter* self, f32 stepSize) {
     TraceResult tr = RigidbodyCharacter_TraceBody(self, from_var, to, radiusScale, 0.5f);
     while tr.startedSolid != 0 {
         radiusScale -= 0.1f;
-        if radiusScale < 0.7000000000000001f {
+        if radiusScale < 0.7f {
             return;
         }
         tr = RigidbodyCharacter_TraceBody(self, from_var, to, radiusScale, 0.5f);
@@ -299,6 +280,7 @@ void RigidbodyCharacter_Reground(RigidbodyCharacter* self, f32 stepSize) {
         DrawLine(from_var, tr.endPosition, MakeColor(b3_colorCyan));
     }
 }
+
 // --- TryStep: 4-phase trace-based step-up algorithm ---
 // Returns true if a step was taken and m_stepPosition was set.
 bool RigidbodyCharacter_TryStep(RigidbodyCharacter* self, f32 maxStepHeight) {
@@ -320,7 +302,7 @@ bool RigidbodyCharacter_TryStep(RigidbodyCharacter* self, f32 maxStepHeight) {
     TraceResult trForward = RigidbodyCharacter_TraceBody(self, forwardFrom, forwardTo, radiusScale, 1.0f);
     while trForward.startedSolid != 0 {
         radiusScale -= 0.1f;
-        if radiusScale < 0.6000000000000001f {
+        if radiusScale < 0.6f {
             DrawLine(forwardFrom, forwardTo, MakeColor(b3_colorRed));
             return false;
         }
@@ -383,6 +365,7 @@ bool RigidbodyCharacter_TryStep(RigidbodyCharacter* self, f32 maxStepHeight) {
     self.m_stepPosition = stepPos;
     return true;
 }
+
 void RigidbodyCharacter_RestoreStep(RigidbodyCharacter* self) {
     if self.m_didStep == 0 {
         return;
@@ -391,6 +374,7 @@ void RigidbodyCharacter_RestoreStep(RigidbodyCharacter* self) {
     b3Body_SetTransform(self.m_bodyId, self.m_stepPosition, rot);
     self.m_didStep = false;
 }
+
 b3Vec3 RigidbodyCharacter_AddClamped(b3Vec3 current, b3Vec3 add, f32 maxAddLength) {
     f32 addLen = b3Length(add);
     if addLen > maxAddLength && addLen > 0.0f {
@@ -398,6 +382,7 @@ b3Vec3 RigidbodyCharacter_AddClamped(b3Vec3 current, b3Vec3 add, f32 maxAddLengt
     }
     return op_add_b3Vec3_b3Vec3(current, add);
 }
+
 // --- UpdateMassCenter: s&box formula ---
 void RigidbodyCharacter_UpdateMassCenter(RigidbodyCharacter* self, f32 wishSpeed) {
     b3MassData massData = b3Body_GetMassData(self.m_bodyId);
@@ -410,6 +395,7 @@ void RigidbodyCharacter_UpdateMassCenter(RigidbodyCharacter* self, f32 wishSpeed
     }
     b3Body_SetMassData(self.m_bodyId, massData);
 }
+
 // --- UpdateBody: set friction, gravity, damping per s&box ---
 void RigidbodyCharacter_UpdateBody(RigidbodyCharacter* self, b3Vec3 wishVelocity) {
     f32 wishLen = b3Length(wishVelocity);
@@ -438,6 +424,7 @@ void RigidbodyCharacter_UpdateBody(RigidbodyCharacter* self, b3Vec3 wishVelocity
     bool wantsDamping = self.m_onGround && wishLen < 1.0f * RigidbodyCharacter_SRC && b3Length(self.m_groundVelocity) < 1.0f * RigidbodyCharacter_SRC;
     b3Body_SetLinearDamping(self.m_bodyId, wantsDamping != 0 ? 10.0f * RigidbodyCharacter_m_brakePower : RigidbodyCharacter_m_airFriction);
 }
+
 // --- AddVelocity: s&box's MoveMode.Walk velocity model ---
 void RigidbodyCharacter_AddVelocity(RigidbodyCharacter* self, b3Vec3 wishVelocity) {
     var wish = b3Vec3{wishVelocity.x, 0.0f, wishVelocity.z};
@@ -468,6 +455,7 @@ void RigidbodyCharacter_AddVelocity(RigidbodyCharacter* self, b3Vec3 wishVelocit
     }
     b3Body_SetLinearVelocity(self.m_bodyId, velocity);
 }
+
 // --- PreStep: UpdateBody + AddVelocity + TryStep ---
 void RigidbodyCharacter_PreStep(RigidbodyCharacter* self, f32 timeStep, b3Vec3 forward, b3Vec3 right, b3Vec2 throttle) {
     if self.m_jumpCooldown > 0.0f {
@@ -485,12 +473,14 @@ void RigidbodyCharacter_PreStep(RigidbodyCharacter* self, f32 timeStep, b3Vec3 f
     self.m_didStep = RigidbodyCharacter_TryStep(self, RigidbodyCharacter_m_stepUpHeight);
     self.m_massCenterWorld = b3Body_GetWorldCenter(self.m_bodyId);
 }
+
 // --- PostStep: RestoreStep + Reground + CategorizeGround ---
 void RigidbodyCharacter_PostStep(RigidbodyCharacter* self, f32 timeStep) {
     RigidbodyCharacter_RestoreStep(self);
     RigidbodyCharacter_Reground(self, RigidbodyCharacter_m_stepDownHeight);
     RigidbodyCharacter_CategorizeGround(self);
 }
+
 void RigidbodyCharacter_Jump(RigidbodyCharacter* self) {
     if self.m_onGround && self.m_jumpCooldown <= 0.0f {
         b3Vec3 velocity = b3Body_GetLinearVelocity(self.m_bodyId);
@@ -500,12 +490,15 @@ void RigidbodyCharacter_Jump(RigidbodyCharacter* self) {
         self.m_jumpCooldown = RigidbodyCharacter_m_jumpCooldownTime;
     }
 }
+
 void RigidbodyCharacter_Step(RigidbodyCharacter* self, f32 timeStep, b3Vec3 forward, b3Vec3 right, b3Vec2 throttle) {
     RigidbodyCharacter_PreStep(self, timeStep, forward, right, throttle);
 }
+
 void RigidbodyCharacter_LateStep(RigidbodyCharacter* self, f32 timeStep) {
     RigidbodyCharacter_PostStep(self, timeStep);
 }
+
 void RigidbodyCharacter_DrawDebug(RigidbodyCharacter* self) {
     b3Pos pos = b3Body_GetPosition(self.m_bodyId);
     b3Vec3 vel = b3Body_GetLinearVelocity(self.m_bodyId);
@@ -514,6 +507,6 @@ void RigidbodyCharacter_DrawDebug(RigidbodyCharacter* self) {
     DrawPoint(self.m_massCenterWorld, 8.0f, MakeColor(b3_colorYellow));
     if self.m_onGround != 0 {
         var bottom = b3Pos{pos.x, pos.y - RigidbodyCharacter_m_totalHeight * 0.5f, pos.z};
-        DrawLine(bottom, b3OffsetPos(bottom, op_mul_float_b3Vec3(0.30000000000000004f, self.m_groundNormal)), MakeColor(b3_colorGreen));
+        DrawLine(bottom, b3OffsetPos(bottom, op_mul_float_b3Vec3(0.3f, self.m_groundNormal)), MakeColor(b3_colorGreen));
     }
 }

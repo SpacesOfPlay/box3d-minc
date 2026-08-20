@@ -182,6 +182,9 @@ void draw_menu_bar() {
         if ImGui_MenuItem("Frame Camera", null, false, true) { cam_frame(); }
         ImGui_Separator();
         ignore ImGui_MenuItem("Diagnostics", "M", &g_show_metrics, true);
+        ImGui_PushItemWidth(8.0f * ImGui_GetFontSize());
+        ignore ImGui_SliderFloat("Draw Distance", &cam_draw_distance, 10.0f, CAM_VIEW_DISTANCE, "%.0f m", 0);
+        ImGui_PopItemWidth();
 
         // upstream sample.cpp:1618 View menu, same items and order.
         ImGui_Separator();

@@ -1,5 +1,5 @@
 # Publishes live-demo/ to GitHub Pages. The wasm is built here, not
-# committed — set Settings > Pages > Source to "GitHub Actions".
+# committed; set Settings > Pages > Source to "GitHub Actions".
 name: pages
 
 on:
@@ -22,8 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Downloaded, not piped to bash: a piped script shares stdin with
-      # its own source.
+      # Downloaded, not piped: a piped script shares stdin with its source.
       - name: install minc
         run: |
           curl -fsSL https://minc.dev/install -o "$RUNNER_TEMP/install.sh"
@@ -33,9 +32,9 @@ jobs:
       - run: minc --version
 
       # cwd is the repo root so `import box3d;` resolves against ./lib.
-      # Two artifacts per program: the loader picks .threads when the
-      # page is cross-origin isolated, the serial one otherwise. No -Os
-      # — it costs multiples of runtime on the solver.
+      # Two artifacts per program: the loader picks .threads on a
+      # cross-origin-isolated page, the serial one otherwise. No -Os, it
+      # costs multiples of runtime on the solver.
       - name: build live-demo
         run: |
           minc sample_browser/main.mc --target wasm -o live-demo/sample_browser.wasm

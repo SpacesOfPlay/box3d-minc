@@ -8,8 +8,8 @@ import math;
 
 // zero-init global
 b3ShapeId b3_nullShapeId;
-// transminc: C #define values surfaced as compile-time configuration
-@define "B3_HASH_INIT" 5381
+// transminc: C #define constants read as values
+const i32 B3_HASH_INIT = 5381;
 
 type errno_t = i32;
 struct Group {
@@ -54,7 +54,7 @@ struct RagdollGroup {
 }
 
 struct FallingRagdollData {
-    RagdollGroup[4] groups;
+    RagdollGroup[2 * 2] groups;
     b3MeshData* gridMesh;
     b3MeshData* torusMesh;
     i32 columnCount;
@@ -107,7 +107,7 @@ struct QuerySpawnOverlapContext {
 // stability, and doubles as a determinism scenario via the sleep hash.
 struct MeshDropData {
     b3MeshData* mesh;
-    b3BodyId[400] bodies;
+    b3BodyId[20 * 20] bodies;
     i32 stepCount;
     i32 sleepStep;
     u32 hash;

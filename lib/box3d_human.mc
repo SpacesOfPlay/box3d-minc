@@ -119,8 +119,8 @@ b3Vec3 RandomUnitVector() {
     f32 u1 = RandomFloatRange(0.0f, 1.0f);
     f32 u2 = RandomFloatRange(0.0f, 2.0f * 3.14159265359f);
     f32 u3 = RandomFloatRange(0.0f, 2.0f * 3.14159265359f);
-    f32 sqrt1MinusU1 = sqrtf(1.0f - u1);
-    f32 sqrtU1 = sqrtf(u1);
+    f32 sqrt1MinusU1 = sqrt(1.0f - u1);
+    f32 sqrtU1 = sqrt(u1);
     b3CosSin cs2 = b3ComputeCosSin(u2);
     b3CosSin cs3 = b3ComputeCosSin(u3);
     noinit b3Vec3 v;
@@ -134,8 +134,8 @@ b3Quat RandomQuat() {
     f32 u1 = RandomFloatRange(0.0f, 1.0f);
     f32 u2 = RandomFloatRange(0.0f, 2.0f * 3.14159265359f);
     f32 u3 = RandomFloatRange(0.0f, 2.0f * 3.14159265359f);
-    f32 sqrt1MinusU1 = sqrtf(1.0f - u1);
-    f32 sqrtU1 = sqrtf(u1);
+    f32 sqrt1MinusU1 = sqrt(1.0f - u1);
+    f32 sqrtU1 = sqrt(u1);
     b3CosSin cs2 = b3ComputeCosSin(u2);
     b3CosSin cs3 = b3ComputeCosSin(u3);
     noinit b3Quat q;

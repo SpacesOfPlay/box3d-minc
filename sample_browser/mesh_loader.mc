@@ -291,21 +291,21 @@ void obj_emit(u8* s, i32 len, TempMesh* mesh, f32 scale, bool zUp, i32 maxArity)
         i = lineEnd < len ? lineEnd + 1 : len;
     }
 
-    free(cast(void*, ring));
-    free(cast(void*, px));
-    free(cast(void*, py));
-    free(cast(void*, prev));
-    free(cast(void*, next));
-    free(cast(void*, fan));
+    free(ring);
+    free(px);
+    free(py);
+    free(prev);
+    free(next);
+    free(fan);
 
     mesh.vertexCount = vertexCount;
     mesh.triangleCount = triangleCount;
 }
 
 void destroy_temp_mesh(TempMesh* mesh) {
-    free(cast(void*, mesh.vertices));
-    free(cast(void*, mesh.indices));
-    free(cast(void*, mesh.materialIndices));
+    free(mesh.vertices);
+    free(mesh.indices);
+    free(mesh.materialIndices);
     mesh.vertices = null;
     mesh.indices = null;
     mesh.materialIndices = null;
@@ -323,19 +323,25 @@ void load_temp_mesh(str path, TempMesh* mesh, f32 scale, bool zUp) {
     mesh.triangleCount = 0;
 
     FileData fd = file_read(path);
-    if fd.data == null || fd.len == 0 {
+    if fd.data == null {
         eprint("mesh_loader: cannot read {}\n", path);
+        return;
+    }
+    defer free(fd.data);
+
+    // obj_count / obj_emit take an i32 length.
+    if fd.len == 0 || fd.len > 2147483647 {
+        eprint("mesh_loader: {} is empty or larger than 2 GB\n", path);
         return;
     }
 
     i32 vertexCount = 0;
     i32 triangleCount = 0;
     i32 maxArity = 0;
-    obj_count(fd.data, fd.len, &vertexCount, &triangleCount, &maxArity);
+    obj_count(fd.data, cast(i32, fd.len), &vertexCount, &triangleCount, &maxArity);
 
     if vertexCount == 0 || triangleCount == 0 {
         eprint("mesh_loader: {} has no geometry\n", path);
-        free(cast(void*, fd.data));
         return;
     }
 
@@ -343,8 +349,7 @@ void load_temp_mesh(str path, TempMesh* mesh, f32 scale, bool zUp) {
     mesh.indices = cast(i32*, alloc(cast(i64, triangleCount * 3 * 4)));
     mesh.materialIndices = cast(u8*, alloc(cast(i64, triangleCount)));
 
-    obj_emit(fd.data, fd.len, mesh, scale, zUp, maxArity);
-    free(cast(void*, fd.data));
+    obj_emit(fd.data, cast(i32, fd.len), mesh, scale, zUp, maxArity);
 }
 
 // upstream CreateMeshData. Returns null if the file is missing.

@@ -101,7 +101,7 @@ str tb_file_path(i32 index) {
 // Breath-first search to compute node depth values start with 0 at the root.
 i32 tb_compute_depths() {
     i32 capacity = g_tb_tree.nodeCapacity;
-    if g_tb_depths != null { free(cast(void*, g_tb_depths)); }
+    if g_tb_depths != null { free(g_tb_depths); }
     g_tb_depths = cast(u16*, alloc(cast(i64, capacity * 2)));
     for i32 i = 0; i < capacity; i += 1 { g_tb_depths[i] = cast(u16, 0); }
 
@@ -134,7 +134,7 @@ i32 tb_compute_depths() {
         }
     }
 
-    free(cast(void*, queue));
+    free(queue);
 
     return depth;
 }
@@ -162,7 +162,7 @@ void tb_create_tree() {
 
     g_tb_proxy_count = 0;
     if g_tb_proxies != null {
-        free(cast(void*, g_tb_proxies));
+        free(g_tb_proxies);
         g_tb_proxies = null;
     }
 
@@ -220,7 +220,7 @@ void tb_create_tree() {
         pos = lineEnd + 1;
     }
 
-    free(cast(void*, fd.data));
+    free(fd.data);
     ignore maxAreaIndex;
 
     u64 ticks = b3GetTicks();
@@ -250,7 +250,7 @@ void tb_load_tree() {
 
     g_tb_proxy_count = 0;
     if g_tb_proxies != null {
-        free(cast(void*, g_tb_proxies));
+        free(g_tb_proxies);
         g_tb_proxies = null;
     }
 
@@ -420,11 +420,11 @@ void destroy_tree_benchmark() {
     b3DynamicTree_Destroy(&g_tb_tree);
     g_tb_tree = b3DynamicTree{};
     if g_tb_proxies != null {
-        free(cast(void*, g_tb_proxies));
+        free(g_tb_proxies);
         g_tb_proxies = null;
     }
     if g_tb_depths != null {
-        free(cast(void*, g_tb_depths));
+        free(g_tb_depths);
         g_tb_depths = null;
     }
     g_tb_proxy_count = 0;

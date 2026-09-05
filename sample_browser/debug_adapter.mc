@@ -89,7 +89,7 @@ bool buffer_reserve_n(f32** buf, i32* cap, i32 count, i32 extra, i32 stride) {
     if grown == null { return false; }
     if *buf != null {
         memcpy(cast(void*, grown), cast(void*, *buf), cast(i64, count * stride * 4));
-        free(cast(void*, *buf));
+        free(*buf);
     }
     *buf = grown;
     *cap = newCap;
@@ -102,8 +102,8 @@ bool buffer_reserve(f32** buf, i32* cap, i32 count, i32 extra) {
 }
 
 void scratch_free() {
-    if g_mesh_scratch != null { free(cast(void*, g_mesh_scratch)); g_mesh_scratch = null; }
-    if g_edge_scratch != null { free(cast(void*, g_edge_scratch)); g_edge_scratch = null; }
+    if g_mesh_scratch != null { free(g_mesh_scratch); g_mesh_scratch = null; }
+    if g_edge_scratch != null { free(g_edge_scratch); g_edge_scratch = null; }
     g_scratch_cap = 0;
     g_edge_scratch_cap = 0;
     g_scratch_verts = 0;
@@ -363,7 +363,7 @@ void build_mesh_edges(b3MeshData* meshData, b3Vec3* verts, b3MeshTriangle* tris)
         if !edge_scratch_line(verts[v0], verts[v1]) { break; }
     }
 
-    free(cast(void*, keys));
+    free(keys);
 }
 
 // The cell diagonal, plus every row and column line. A line is skipped
@@ -445,7 +445,7 @@ void build_height_field_edges(b3HeightFieldData* hf, b3Vec3* grid, u8* materials
         if !edge_scratch_line(grid[v0], grid[v1]) { break; }
     }
 
-    free(cast(void*, keys));
+    free(keys);
 }
 
 // upstream debug_shapes.c HeightFieldSample: heights are compressed to
@@ -516,7 +516,7 @@ i32 build_height_field(b3HeightFieldData* hf) {
             if !scratch_tri(a0, b0, c0, triangle_normal(a0, b0, c0))
                || !scratch_tri(a1, b1, c1, triangle_normal(a1, b1, c1)) {
                 g_mesh_overflow_count++;
-                free(cast(void*, grid));
+                free(grid);
                 scratch_free();
                 return -1;
             }
@@ -524,14 +524,14 @@ i32 build_height_field(b3HeightFieldData* hf) {
     }
 
     if g_scratch_verts == 0 {
-        free(cast(void*, grid));
+        free(grid);
         scratch_free();
         return -1;
     }
 
     build_height_field_edges(hf, grid, materials, rows, cols);
 
-    free(cast(void*, grid));
+    free(grid);
     return mesh_commit(hf.hash, MESH_KIND_HEIGHTFIELD);
 }
 
@@ -841,7 +841,7 @@ void* adapter_create_shape(b3DebugShape* ds, void* ctx) {
     }
 
     g_ashapes[slot].live = true;
-    return cast(void*, &g_ashapes[slot]);
+    return &g_ashapes[slot];
 }
 
 void adapter_destroy_shape(void* userShape, void* ctx) {

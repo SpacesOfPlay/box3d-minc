@@ -1173,9 +1173,7 @@ OverflowColorPileData CreateOverflowColorPile(b3WorldId worldId) {
             f32 theta = thetaOffset + 2.0f * 3.14159265359f * cast(f32, slot) / 5.0f;
             b3BodyDef bodyDef = b3DefaultBodyDef();
             bodyDef.type = b3_dynamicBody;
-            bodyDef.position = b3Pos{
-                ringRadius * cast(f32, cosf(theta)), y, ringRadius * cast(f32, sinf(theta)),
-            };
+            bodyDef.position = b3Pos{ringRadius * cos(theta), y, ringRadius * sin(theta)};
             b3BodyId bodyId = b3CreateBody(worldId, &bodyDef);
             b3CreateHullShape(bodyId, &neighborShape, &neighborBox.base);
         }

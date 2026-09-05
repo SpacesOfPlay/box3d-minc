@@ -206,7 +206,7 @@ TraceResult RigidbodyCharacter_TraceBody(RigidbodyCharacter* self, b3Pos from_va
 }
 
 bool RigidbodyCharacter_IsStandableSurface(RigidbodyCharacter* self, b3Vec3 normal) {
-    f32 maxSlopeCos = cosf(RigidbodyCharacter_m_maxSlopeAngle * 3.14159265359f / 180.0f);
+    f32 maxSlopeCos = cos(RigidbodyCharacter_m_maxSlopeAngle * 3.14159265359f / 180.0f);
     return b3Dot(normal, b3Vec3_axisY) >= maxSlopeCos;
 }
 

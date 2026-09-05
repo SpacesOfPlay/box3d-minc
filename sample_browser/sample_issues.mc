@@ -918,8 +918,8 @@ void sg_create_floor_chunk(i32 chunk, f32 x0U, f32 x1U) {
 
     g_sg_chunk_mesh[chunk] = b3CreateMesh(&meshDef, null, 0);
 
-    free(cast(void*, g_sg_vertices));
-    free(cast(void*, g_sg_indices));
+    free(g_sg_vertices);
+    free(g_sg_indices);
     g_sg_vertices = null;
     g_sg_indices = null;
 

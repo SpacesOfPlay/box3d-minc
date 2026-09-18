@@ -295,16 +295,26 @@ struct SampleDef {
     // upstream Sample::HasSolverControls: a debug sample hides the
     // Solver section. Inverted here so the default is upstream's true.
     bool hideSolverControls;
+    // View-space distance range the shadow cascades split over. Left
+    // at zero the range is guessed from the world bounds, which only
+    // works when the camera sits close to the content. A scene viewed
+    // from far off wants an explicit range: the guess spends every
+    // cascade on the empty space in front of the camera and the
+    // shadows stop partway into the scene. Authored against the
+    // sample's opening camera, so flying well away can still outrun
+    // the far end.
+    f32 shadowSplitNear;
+    f32 shadowSplitFar;
 }
 
-const i32 NUM_SAMPLES = 157;
+const i32 NUM_SAMPLES = 163;
 SampleDef[NUM_SAMPLES] g_samples;
 i32 g_sample;
 bool g_sample_loaded;
 
 void def_sample(i32 i, str category, str name, f32 yawDeg, f32 pitchDeg,
                 f32 radius, float3 pivot, BuildFn build, StepFn step) {
-    g_samples[i] = SampleDef{category, name, yawDeg, pitchDeg, radius, pivot, build, null, step, null, null, null, null, null, null, null, false};
+    g_samples[i] = SampleDef{category, name, yawDeg, pitchDeg, radius, pivot, build, null, step, null, null, null, null, null, null, null, false, 0.0f, 0.0f};
 }
 
 void setup_samples() {
@@ -319,6 +329,7 @@ void setup_samples() {
     def_sample(7, "Stacking", "Double Domino",    0.0f, 15.0f, 15.0f, float3{0.0f, 0.5f, 1.0f}, build_double_domino, nostep);
     def_sample(8, "Stacking", "Pyramid2D",        0.0f, 30.0f, 50.0f, float3{0.0f, 5.0f, 0.0f}, build_pyramid_2d, nostep);
     def_sample(9, "Benchmark", "Large Pyramid",   40.0f, -10.0f, 110.0f, float3{0.0f, 40.0f, 0.0f}, build_large_pyramid, nostep);
+    g_samples[9].shadowSplitFar = 180.0f;
     def_sample(10, "Benchmark", "Wide Pyramid",    0.0f, 5.0f, 80.0f, float3{0.0f, 18.0f, 0.0f}, build_wide_pyramid, nostep);
     def_sample(11, "Benchmark", "Many Pyramids",   -10.0f, 10.0f, 120.0f, float3{0.0f, 5.0f, 0.0f}, build_many_pyramids, nostep);
     def_sample(12, "Benchmark", "Falling Boxes",   45.0f, 10.0f, 80.0f, float3{0.0f, 20.0f, 0.0f}, build_falling_boxes, nostep);
@@ -385,6 +396,10 @@ void setup_samples() {
     def_sample(72, "Benchmark", "Hull",           0.0f, 15.0f, 5.0f, float3{0.0f, 0.0f, 0.0f}, build_benchmark_hull, step_benchmark_hull);
     def_sample(73, "Benchmark", "Junkyard",       45.0f, 30.0f, 125.0f, float3{0.0f, 0.0f, 0.0f}, build_junkyard, step_junkyard);
     def_sample(74, "Benchmark", "Convex Pile",    45.0f, 20.0f, 150.0f, float3{0.0f, 15.0f, 0.0f}, build_convex_pile, nostep);
+    // Watched from 150 m out, so the settled pile sits between 100 and
+    // 180 m of view depth and the guessed range stops less than halfway
+    // into it.
+    g_samples[74].shadowSplitFar = 180.0f;
     def_sample(75, "Shapes", "Conveyor Belt",    0.0f, 25.0f, 40.0f, float3{0.0f, 1.0f, 0.0f}, build_conveyor_belt, nostep);
     def_sample(76, "Shapes", "Wind",             0.0f, 0.0f, 5.0f, float3{0.0f, 1.0f, 0.0f}, build_wind, step_wind);
     def_sample(77, "Shapes", "Wind Drop",        -45.0f, 15.0f, 20.0f, float3{0.0f, 5.0f, 0.0f}, build_wind_drop, step_wind_drop);
@@ -443,11 +458,17 @@ void setup_samples() {
     def_sample(146, "Collision", "Time of Impact", -90.0f, 0.0f, 10.0f, float3{0.0f, 0.0f, 0.0f}, build_time_of_impact, step_time_of_impact);
     def_sample(143, "Shapes", "Conveyor Mesh",   65.0f, 25.0f, 28.0f, float3{0.0f, 1.0f, 0.0f}, build_conveyor_mesh, step_conveyor_mesh);
     def_sample(144, "Character", "MoverOverlap", 120.0f, 25.0f, 10.0f, float3{0.0f, 1.0f, 0.0f}, build_mover_overlap, step_mover_overlap);
-    def_sample(152, "Character", "Mover", 120.0f, 30.0f, 5.0f, float3{7.5f, 0.75f, 9.0f}, build_basic_mover, step_basic_mover);
+    def_sample(152, "Character", "Geometric Mover", 120.0f, 30.0f, 5.0f, float3{7.5f, 0.75f, 9.0f}, build_geometric_mover, step_geometric_mover);
     def_sample(153, "Compound", "Village", 45.0f, 10.0f, 5.0f, float3{0.0f, 10.0f, 0.0f}, build_village, step_village);
     def_sample(154, "Collision", "Shape Distance", -45.0f, 10.0f, 5.0f, float3{0.0f, 0.0f, 0.0f}, build_shape_distance, step_shape_distance);
     def_sample(155, "Character", "Rigid Body", 120.0f, 30.0f, 5.0f, float3{7.5f, 2.0f, 9.0f}, build_rigid_body_character, step_rigid_body_character);
     def_sample(156, "Tree", "Benchmark", 45.0f, 45.0f, 250.0f, float3{0.0f, 0.0f, 0.0f}, build_tree_benchmark, step_tree_benchmark);
+    def_sample(157, "Bodies", "Class Ring", 40.0f, 30.0f, 15.0f, float3{0.0f, 2.0f, 0.0f}, build_class_ring, nostep);
+    def_sample(158, "Bodies", "Offset Kinematic", 0.0f, 30.0f, 10.0f, float3{0.0f, 1.5f, 0.0f}, build_offset_kinematic, nostep);
+    def_sample(159, "Events", "Contact", 0.0f, 35.0f, 60.0f, float3{0.0f, 0.0f, 0.0f}, build_contact_event, step_contact_event_post);
+    def_sample(160, "Issues", "Huge Box", 0.0f, 25.0f, 10.0f, float3{0.0f, 0.0f, 0.0f}, build_huge_box, nostep);
+    def_sample(161, "Issues", "Heightfield", -90.0f, 5.0f, 50.0f, float3{50.0f, 10.0f, 50.0f}, build_heightfield_issue, nostep);
+    def_sample(162, "Joints", "Fold Out", 20.0f, 10.0f, 28.0f, float3{0.0f, 7.0f, 0.0f}, build_fold_out, nostep);
     def_sample(141, "Character", "CapsulePlane", 120.0f, 30.0f, 20.0f, float3{0.0f, 1.5f, 0.0f}, build_capsule_plane, step_capsule_plane);
     def_sample(142, "Bodies", "Cast",            120.0f, 30.0f, 20.0f, float3{0.0f, 1.5f, 0.0f}, build_body_cast, step_body_cast);
     def_sample(139, "Events", "Hit",        0.0f, 30.0f, 100.0f, float3{0.0f, 5.0f, 0.0f}, build_hit_event, step_hit_event);
@@ -622,13 +643,13 @@ void setup_samples() {
     g_samples[151].controls = driving_controls;
     g_samples[151].destroy = destroy_driving;
     g_samples[151].keyboard = driving_keyboard;
-    // upstream BasicMover::Step and Village::Step are wholly ahead of
+    // upstream GeometricMover::Step and Village::Step are wholly ahead of
     // Sample::Step() — the mover drives velocity before the solver runs.
-    g_samples[152].preStep = step_basic_mover;
-    g_samples[152].step = null;
-    g_samples[152].controls = basic_mover_controls;
-    g_samples[152].keyboard = basic_mover_keyboard;
-    g_samples[152].destroy = destroy_basic_mover;
+    g_samples[152].preStep = step_geometric_mover;
+    g_samples[152].step = step_geometric_mover_post;
+    g_samples[152].controls = geometric_mover_controls;
+    g_samples[152].keyboard = geometric_mover_keyboard;
+    g_samples[152].destroy = destroy_geometric_mover;
     g_samples[153].preStep = step_village;
     g_samples[153].step = null;
     g_samples[153].keyboard = village_keyboard;
@@ -660,6 +681,14 @@ void setup_samples() {
     g_samples[107].destroy = destroy_continuous_mesh_drop;
     g_samples[106].destroy = destroy_crash;
     g_samples[100].destroy = destroy_falling_trees;
+    // ClassRing runs 15 hidden steps ahead of the frame's own and pins
+    // the Solver rate while it is up; ContactEvent drives ahead of the
+    // step and reads the step's contact events after it.
+    g_samples[157].preStep = step_class_ring;
+    g_samples[157].destroy = destroy_class_ring;
+    g_samples[159].preStep = step_contact_event;
+    g_samples[159].controls = contact_event_controls;
+    g_samples[161].destroy = destroy_heightfield_issue;
     g_samples[97].destroy = destroy_stall;
     g_samples[91].destroy = destroy_benchmark_height_field;
     g_samples[90].destroy = destroy_grid_mesh;
@@ -757,10 +786,23 @@ void load_sample(i32 index, bool restart) {
     b3World_SetContactRecycleDistance(g_world, g_recycle_distance);
     g_samples[index].build();
     g_sample_loaded = true;
-    // upstream sample.cpp: fit the shadow range to the world bounds.
-    b3AABB shadowBounds = b3World_GetBounds(g_world);
-    f32 diagonal = b3Distance(shadowBounds.lowerBound, shadowBounds.upperBound);
-    g_shadow_split_far = b3ClampFloat(diagonal, SHADOW_SPLIT_FAR, SHADOW_SPLIT_FAR_MAX);
+    // upstream SelectSample: a sample that knows where its content sits
+    // relative to its camera says so, and is taken at its word. The
+    // ceiling below guards a guess, not a measurement.
+    if g_samples[index].shadowSplitFar > 0.0f {
+        // A sample wanting only more reach leaves the near end at zero.
+        f32 splitNear = g_samples[index].shadowSplitNear;
+        set_shadow_splits(splitNear > 0.0f ? splitNear : SHADOW_SPLIT_NEAR,
+                          g_samples[index].shadowSplitFar);
+    } else {
+        // Otherwise fit the range to the world bounds. The bounds are a
+        // poor proxy for how far shadows need to reach: a ground plate
+        // stretches the diagonal well past anything worth shadowing, so
+        // the ceiling matters more than the estimate.
+        b3AABB shadowBounds = b3World_GetBounds(g_world);
+        f32 diagonal = b3Distance(shadowBounds.lowerBound, shadowBounds.upperBound);
+        set_shadow_splits(SHADOW_SPLIT_NEAR, b3ClampFloat(diagonal, SHADOW_SPLIT_FAR, SHADOW_SPLIT_FAR_MAX));
+    }
     // upstream: SetView only when restart == false (R keeps the camera)
     if !restart {
         SampleDef* sd = &g_samples[index];

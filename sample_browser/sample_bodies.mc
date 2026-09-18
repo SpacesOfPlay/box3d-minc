@@ -548,6 +548,7 @@ void build_gyroscopic_precession() {
     b3HullData* hull = b3CreateHull(cast(b3Vec3*, &hullPoints), numSegs + 1, numSegs + 1);
 
     b3ShapeDef shapeDef = b3DefaultShapeDef();
+    shapeDef.baseMaterial.rollingResistance = 0.1f;
 
     // Tilt the top, then spin it about its own symmetry axis. Gravity does the rest.
     b3Quat rotation = b3MakeQuatFromAxisAngle(b3Vec3_axisZ, 15.0f * PI_F / 180.0f);
@@ -862,4 +863,103 @@ void step_body_cast(f32 timeStep) {
     t.q = b3Quat_identity;
     dbg_axes(t, 4.0f);
     dbg_hull(g_bc_transform, g_bc_cylinder, b3_colorBlue);
+}
+
+// samples/sample_bodies.cpp ClassRing. A spinning class ring flips its
+// heavy gem from bottom to top. Contact points only keep up with the
+// spin at 960 Hz: upstream steps 16 hidden times per frame; here the
+// Solver rate is 960 Hz / 8 substeps while the sample is up and 15 extra
+// steps run ahead of the frame's own.
+b3BodyId g_cr_ring;
+f32 g_cr_saved_hertz;
+i32 g_cr_saved_substeps;
+
+void build_class_ring() {
+    ignore add_ground_box(100.0f);
+
+    i32 n = 24;
+    f32 r = 1.0f;
+    f32 tubeRadius = 0.1f * r;
+    f32 axisRadius = r - tubeRadius;
+
+    b3BodyDef bodyDef = b3DefaultBodyDef();
+    bodyDef.type = b3_dynamicBody;
+    bodyDef.position = b3Pos{0.0f, r, 0.0f};
+    bodyDef.rotation = b3MakeQuatFromAxisAngle(b3Vec3_axisX, 13.0f * PI_F / 180.0f);
+    bodyDef.allowFastRotation = true;
+    bodyDef.enableContactRecycling = false;
+    b3BodyId bodyId = b3CreateBody(g_world, &bodyDef);
+
+    b3ShapeDef shapeDef = b3DefaultShapeDef();
+    shapeDef.density = 1.0f;
+
+    // Band built from a loop of capsules.
+    b3Vec3[24] vertices;
+    f32 deltaAngle = 2.0f * PI_F / cast(f32, n);
+    b3CosSin cs = b3ComputeCosSin(deltaAngle);
+    f32 x = axisRadius;
+    f32 y = 0.0f;
+    for i32 i = 0; i < n; ++i {
+        vertices[i] = b3Vec3{x, y, 0.0f};
+        f32 x2 = cs.cosine * x - cs.sine * y;
+        f32 y2 = cs.sine * x + cs.cosine * y;
+        x = x2;
+        y = y2;
+    }
+
+    for i32 i = 0; i < n; ++i {
+        b3Capsule capsule = b3Capsule{vertices[i], vertices[(i + 1) % n], tubeRadius};
+        ignore b3CreateCapsuleShape(bodyId, &shapeDef, &capsule);
+    }
+
+    // Heavy gem provides the mass asymmetry that drives the inversion.
+    shapeDef.density = 2.0f;
+    b3Sphere sphere = b3Sphere{b3Vec3{0.0f, -0.65f * r, 0.0f}, 0.3f};
+    ignore b3CreateSphereShape(bodyId, &shapeDef, &sphere);
+
+    b3Vec3 angularVelocity = b3RotateVector(bodyDef.rotation, b3Vec3{0.0f, 100.0f, 0.0f});
+    b3Body_SetAngularVelocity(bodyId, angularVelocity);
+
+    g_cr_ring = bodyId;
+
+    g_cr_saved_hertz = g_hertz;
+    g_cr_saved_substeps = g_substeps;
+    g_hertz = 16.0f * 60.0f;
+    g_substeps = 8;
+}
+
+// The 15 hidden steps that keep the render real-time; the frame's own
+// step is the 16th.
+void step_class_ring(f32 timeStep) {
+    if timeStep <= 0.0f { return; }
+    for i32 i = 0; i < 15; ++i {
+        b3World_Step(g_world, timeStep, g_substeps);
+    }
+}
+
+void destroy_class_ring() {
+    g_hertz = g_cr_saved_hertz;
+    g_substeps = g_cr_saved_substeps;
+}
+
+// samples/sample_bodies.cpp OffsetKinematic: a kinematic body whose
+// shape and center of mass sit away from its origin.
+void build_offset_kinematic() {
+    ignore add_ground_box(20.0f);
+
+    b3BodyDef bodyDef = b3DefaultBodyDef();
+    bodyDef.name = "kinematic";
+    bodyDef.type = b3_kinematicBody;
+    bodyDef.position.y = 3.0f;
+    b3BodyId bodyId = b3CreateBody(g_world, &bodyDef);
+    b3Vec3 offset = b3Vec3{0.5f, 0.5f, 1.0f};
+    b3BoxHull box = b3MakeTransformedBoxHull(0.5f, 0.5f, 1.0f, b3Transform{offset, b3Quat_identity});
+    b3ShapeDef shapeDef = b3DefaultShapeDef();
+    ignore b3CreateHullShape(bodyId, &shapeDef, &box.base);
+
+    b3MassData massData = b3Body_GetMassData(bodyId);
+    massData.center = offset;
+    b3Body_SetMassData(bodyId, massData);
+
+    b3Body_SetAngularVelocity(bodyId, b3Vec3{1.0f, -1.0f, 2.0f});
 }

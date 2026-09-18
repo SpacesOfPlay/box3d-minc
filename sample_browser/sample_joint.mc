@@ -1171,6 +1171,7 @@ void build_motion_locks() {
     // distance joint
     {
         bodyDef.position = position;
+        bodyDef.angularDamping = 0.5f;
         g_ml_bodies[g_ml_count] = b3CreateBody(g_world, &bodyDef);
         ignore b3CreateHullShape(g_ml_bodies[g_ml_count], &shapeDef, &box.base);
         f32 length = 2.0f;
@@ -2251,8 +2252,7 @@ void step_driving(f32 timeStep) {
 
     if cam_third_person {
         b3WorldTransform transform = b3Body_GetTransform(g_dr_chassis);
-        cam_pivot = float3{transform.p.x, transform.p.y, transform.p.z};
-        cam_rebuild_basis();
+        cam_set_target(transform.p);
     }
 
     b3Vec3 velocity = b3Body_GetLinearVelocity(g_dr_chassis);
@@ -2292,4 +2292,47 @@ void step_driving(f32 timeStep) {
     b3WorldTransform transform = b3WorldTransform_identity;
     transform.p.y += 0.05f;
     dbg_axes(transform, 2.0f);
+}
+
+// samples/sample_joint.cpp FoldOut: a zig-zag of revolute-jointed slats
+// that unfolds under motor torque.
+void build_fold_out() {
+    f32 halfLength = 2.0f;
+    f32 spacing = 1.0f;
+
+    b3BoxHull box = b3MakeBoxHull(halfLength, 0.1f, 0.25f);
+    b3Quat axisQuat = b3ComputeQuatBetweenUnitVectors(b3Vec3_axisZ, b3Vec3_axisY);
+
+    b3RevoluteJointDef jointDef = b3DefaultRevoluteJointDef();
+    jointDef.base.localFrameA.p = b3Vec3{-halfLength, 1.0f, 0.0f};
+    jointDef.base.localFrameA.q = axisQuat;
+    jointDef.base.localFrameB.q = axisQuat;
+    jointDef.base.drawScale = 0.5f;
+    jointDef.base.constraintHertz = 240.0f;
+    jointDef.enableMotor = true;
+    jointDef.maxMotorTorque = 1000.0f;
+
+    b3BodyId prevBodyId = add_ground_box(20.0f);
+
+    b3BodyDef bodyDef = b3DefaultBodyDef();
+    bodyDef.position.y = 0.5f * spacing;
+    bodyDef.type = b3_dynamicBody;
+    b3ShapeDef shapeDef = b3DefaultShapeDef();
+    shapeDef.density *= 2.0f;
+
+    for i32 i = 0; i < 6; ++i {
+        b3BodyId bodyId = b3CreateBody(g_world, &bodyDef);
+        ignore b3CreateHullShape(bodyId, &shapeDef, &box.base);
+
+        f32 x = (i & 1) != 0 ? halfLength : -halfLength;
+
+        jointDef.base.bodyIdA = prevBodyId;
+        jointDef.base.bodyIdB = bodyId;
+        jointDef.base.localFrameB.p = b3Vec3{x, -0.5f * spacing, 0.0f};
+        ignore b3CreateRevoluteJoint(g_world, &jointDef);
+
+        bodyDef.position.y += spacing;
+        jointDef.base.localFrameA.p = b3Vec3{-x, 0.5f * spacing, 0.0f};
+        prevBodyId = bodyId;
+    }
 }

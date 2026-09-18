@@ -2,7 +2,8 @@
 //
 // Two modes share one state: ORBIT (Alt held: left-drag orbit,
 // middle-drag pan, right-drag radial zoom) and FLY (right mouse without
-// Alt: FPS look + WASD at cam_speed, scroll tunes speed). Bare scroll is
+// Alt: FPS look, WASD along the view and Q/E along world down/up at
+// cam_speed, scroll tunes speed). Bare scroll is
 // multiplicative zoom. OnEvent accumulates deltas, cam_update consumes
 // them per frame. forward is pivot -> eye (+view-Z); the look direction
 // is -forward.
@@ -64,6 +65,7 @@ bool cam_alt_down;
 // drives cam_pivot to the body it follows.
 bool cam_third_person;
 bool cam_w_down; bool cam_a_down; bool cam_s_down; bool cam_d_down;
+bool cam_q_down; bool cam_e_down;
 
 f32 cam_pitch_lim() { return 0.5f * PI_F - 0.01f; }
 
@@ -109,6 +111,15 @@ void cam_set_view(f32 yawDeg, f32 pitchDeg, f32 radius, float3 pivot) {
     cam_set_orbit(yawDeg * PI_F / 180.0f, pitchDeg * PI_F / 180.0f, radius);
 }
 
+// Camera::SetTarget: aim at a point read straight from the world, as a
+// follow cam does. Upstream maps it through the sim-to-display scale
+// and up-axis swap; both are identity here, so the pivot takes it as
+// is and the basis refreshes.
+void cam_set_target(b3Pos target) {
+    cam_pivot = float3{target.x, target.y, target.z};
+    cam_rebuild_basis();
+}
+
 // Camera::OnEvent, verbatim: route deltas by button + Alt state.
 void cam_on_event(sapp_event* ev) {
     u32 mods = ev.modifiers & (SAPP_MODIFIER_SHIFT | SAPP_MODIFIER_CTRL | SAPP_MODIFIER_ALT);
@@ -148,6 +159,8 @@ void cam_on_event(sapp_event* ev) {
         if ev.key_code == SAPP_KEYCODE_A { cam_a_down = true; }
         if ev.key_code == SAPP_KEYCODE_S { cam_s_down = true; }
         if ev.key_code == SAPP_KEYCODE_D { cam_d_down = true; }
+        if ev.key_code == SAPP_KEYCODE_Q { cam_q_down = true; }
+        if ev.key_code == SAPP_KEYCODE_E { cam_e_down = true; }
         if ev.key_code == SAPP_KEYCODE_LEFT_ALT || ev.key_code == SAPP_KEYCODE_RIGHT_ALT {
             cam_alt_down = true;
         }
@@ -156,6 +169,8 @@ void cam_on_event(sapp_event* ev) {
         if ev.key_code == SAPP_KEYCODE_A { cam_a_down = false; }
         if ev.key_code == SAPP_KEYCODE_S { cam_s_down = false; }
         if ev.key_code == SAPP_KEYCODE_D { cam_d_down = false; }
+        if ev.key_code == SAPP_KEYCODE_Q { cam_q_down = false; }
+        if ev.key_code == SAPP_KEYCODE_E { cam_e_down = false; }
         if ev.key_code == SAPP_KEYCODE_LEFT_ALT || ev.key_code == SAPP_KEYCODE_RIGHT_ALT {
             cam_alt_down = false;
         }
@@ -168,6 +183,8 @@ void cam_on_event(sapp_event* ev) {
         cam_a_down = false;
         cam_s_down = false;
         cam_d_down = false;
+        cam_q_down = false;
+        cam_e_down = false;
         cam_alt_down = false;
     }
 }
@@ -222,19 +239,22 @@ void cam_update(f32 dt) {
 
         f32 wasdF = 0.0f;   // +forward = backwards (forward = pivot->eye)
         f32 wasdR = 0.0f;
+        f32 wasdU = 0.0f;   // Q/E fall and rise along world up, not the view basis
         if cam_w_down { wasdF -= 1.0f; }
         if cam_s_down { wasdF += 1.0f; }
         if cam_d_down { wasdR += 1.0f; }
         if cam_a_down { wasdR -= 1.0f; }
+        if cam_e_down { wasdU += 1.0f; }
+        if cam_q_down { wasdU -= 1.0f; }
 
         float3 eye = eyeBefore;
-        if wasdF != 0.0f || wasdR != 0.0f {
+        if wasdF != 0.0f || wasdR != 0.0f || wasdU != 0.0f {
             float3 r = float3{forward.z, 0.0f, -forward.x};   // cross(worldUp, forward)
             f32 rlen = sqrtf(r.x * r.x + r.z * r.z);
             if rlen > 0.000001f { r.x /= rlen; r.z /= rlen; }
             f32 step = cam_speed * dt;
             eye.x += forward.x * wasdF * step + r.x * wasdR * step;
-            eye.y += forward.y * wasdF * step;
+            eye.y += forward.y * wasdF * step + wasdU * step;
             eye.z += forward.z * wasdF * step + r.z * wasdR * step;
         }
 

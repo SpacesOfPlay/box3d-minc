@@ -158,7 +158,7 @@ void draw_menu_bar() {
     if !ImGui_BeginMainMenuBar() { return; }
     if ImGui_BeginMenu("Sim", true) {
         ignore ImGui_MenuItem("Pause", "P", &g_pause, true);
-        if ImGui_MenuItem("Single Step", "O", false, true) { g_single_step += 1; }
+        if ImGui_MenuItem("Single Step", ".", false, true) { g_single_step += 1; }
         if ImGui_MenuItem("Restart", "R", false, true) { g_reset_pending = true; }
         ImGui_Separator();
         if ImGui_MenuItem("Previous Sample", "[", false, true) { g_switch_pending = -1; }
@@ -185,6 +185,51 @@ void draw_menu_bar() {
         ImGui_PushItemWidth(8.0f * ImGui_GetFontSize());
         ignore ImGui_SliderFloat("Draw Distance", &cam_draw_distance, 10.0f, CAM_VIEW_DISTANCE, "%.0f m", 0);
         ImGui_PopItemWidth();
+        // upstream Render menu, Cascades submenu.
+        if ImGui_BeginMenu("Cascades", true) {
+            ImGui_PushItemWidth(8.0f * ImGui_GetFontSize());
+            // Where the split distribution starts, not where shadows
+            // start. Raising it hands the whole working volume to the
+            // first cascade and coarsens it to suit. The c0 row below
+            // is what to steer by: how far the sharp cascade reaches
+            // and what one of its texels costs.
+            f32 splitNear = g_shadow_split_near;
+            if ImGui_SliderFloat("Start", &splitNear, 0.1f, 30.0f, "%.1f m", 0) {
+                set_shadow_splits(splitNear, g_shadow_split_far);
+            }
+            // Selecting a sample refits the range to the world, so a
+            // value dialed in here survives only until the next switch.
+            f32 splitFar = g_shadow_split_far;
+            if ImGui_SliderFloat("Range", &splitFar, 10.0f, 200.0f, "%.0f m", 0) {
+                set_shadow_splits(g_shadow_split_near, splitFar);
+            }
+            f32 lambda = g_shadow_split_lambda;
+            if ImGui_SliderFloat("Distribution", &lambda, 0.0f, 1.0f, "%.2f", 0) {
+                set_shadow_split_lambda(lambda);
+            }
+            ImGui_PopItemWidth();
+            // Where each cascade ends and how much world one of its
+            // texels covers. A quality cliff at a boundary is the step
+            // between two neighboring texel sizes, easier to read here
+            // than off the image.
+            if ImGui_BeginTable("cascades", 3, ImGuiTableFlags_SizingFixedFit) {
+                ImGui_TableSetupColumn("csm");
+                ImGui_TableSetupColumn("far");
+                ImGui_TableSetupColumn("texel");
+                ImGui_TableHeadersRow();
+                for i32 i = 0; i < SHADOW_CASCADES; i++ {
+                    ImGui_TableNextRow();
+                    ignore ImGui_TableSetColumnIndex(0);
+                    ImGui_Text("%d", i);
+                    ignore ImGui_TableSetColumnIndex(1);
+                    ImGui_Text("%.1f m", g_cascade_far[i]);
+                    ignore ImGui_TableSetColumnIndex(2);
+                    ImGui_Text("%.0f mm", 1000.0f * g_cascade_texel[i]);
+                }
+                ImGui_EndTable();
+            }
+            ImGui_EndMenu();
+        }
 
         // upstream sample.cpp:1618 View menu, same items and order.
         ImGui_Separator();

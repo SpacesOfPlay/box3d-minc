@@ -1,4 +1,4 @@
-// Rendering: the shaders, the sphere and capsule meshes, and the shadow
+// Rendering: the shaders, the impostor proxy cube, and the shadow
 // cascade fit.
 
 // --- shaders --------------------------------------------------------
@@ -47,14 +47,27 @@ struct InstPass {
 // Per-pass shadow data (uniform slot 1). Each cascade matrix folds in
 // the clip-space-to-texture-space remap, so the fragment shader divides
 // by w and uses xy as the lookup, z as the reference depth.
-const i32 SHADOW_CASCADES = 3;
+//
+// Four cascades, upstream's count. Per-cascade values ride in float4
+// lanes, so four is also the ceiling. More cascades cannot sharpen the
+// last one, which always has to reach the far split; they buy a finer
+// near cascade and a smaller step at each boundary, at the cost of
+// another shadow pass.
+const i32 SHADOW_CASCADES = 4;
 
 struct ShadowUni {
     float4x4[SHADOW_CASCADES] cascade;
-    float4 cascadeFar;   // xyz: far view depth of each cascade
-    float4 camPos;       // xyz: camera position, zero in the relative frame
-    float4 viewDir;      // xyz: camera looking direction
-    float4 shParams;     // x: PCF tap offset in UV, y: unshadowed floor
+    float4 cascadeFar;         // far view depth of each cascade
+    float4 cascadeTexelWorld;  // one shadow texel in world units, per cascade
+    float4 cascadeDepthBias;   // residual comparison bias in depth units, per cascade
+    float4 camPos;             // xyz: camera position, zero in the relative frame
+    float4 viewDir;            // xyz: camera looking direction
+    float4 shParams;           // x: one texel in UV, y: unshadowed floor
+    // Rows of the view-projection the impostors rebuild their depth
+    // from, and the clip-to-window depth remap of the target.
+    float4 clipZ;
+    float4 clipW;
+    float4 depthRemap;         // x: scale, y: offset
     // upstream geom.glsl grid_offset: xy = draw origin wrapped to the grid
     // period, for the lines; zw = the full origin x/z, for the axes. wpos
     // is eye-relative, so the lines add a small wrapped offset and stay
@@ -106,6 +119,137 @@ const f32 EDGE_THICKNESS_PX = 1.5f;   // upstream edges.c thicknessPx
 // sqrt(2) on a 45 degree line, so the pad must be >= ~1.42.
 const f32 EDGE_AA_PAD_PX = 1.5f;
 
+// Lane i of a per-cascade float4.
+f32 shadow_lane(float4 v, i32 i) {
+    if i == 0 { return v.x; }
+    if i == 1 { return v.y; }
+    if i == 2 { return v.z; }
+    return v.w;
+}
+
+// The shadow lookup, shared by the mesh and impostor fragment shaders
+// after upstream's common/shadow_cascade.glsl, common/shadow_pcf.glsl
+// and the sampleCascade in shapes/cube.glsl. A helper cannot take the
+// texture, so the sixteen taps themselves stay in each shader; these
+// produce everything around them.
+
+struct ShadowSel {
+    i32 c;       // cascade whose slice holds this view depth
+    f32 alpha;   // blend weight into the next cascade, 0 outside the band
+}
+
+// The cascade is picked by view depth; the last one is a fallback
+// rather than a range, its map footprint runs well past the final
+// split. The last 10% of each cascade's range blends with the next:
+// texel density jumps by roughly 2.5x at every boundary, so even with
+// matched bias the penumbra width changes there, and without the blend
+// that reads as a polygonal step on the ground.
+ShadowSel shadow_select(float4 cascadeFar, f32 viewZ) {
+    ShadowSel s;
+    s.c = SHADOW_CASCADES - 1;
+    s.alpha = 0.0f;
+    if viewZ < cascadeFar.x { s.c = 0; }
+    else if viewZ < cascadeFar.y { s.c = 1; }
+    else if viewZ < cascadeFar.z { s.c = 2; }
+    if s.c < SHADOW_CASCADES - 1 {
+        f32 farZ = shadow_lane(cascadeFar, s.c);
+        f32 nearZ = s.c == 0 ? 0.0f : shadow_lane(cascadeFar, s.c - 1);
+        f32 blendStart = mix(farZ, nearZ, 0.1f);
+        if viewZ > blendStart {
+            s.alpha = (viewZ - blendStart) / (farZ - blendStart);
+        }
+    }
+    return s;
+}
+
+// Where cascade cc reads for a surface point: the lookup moved
+// sideways along the normal (normal-offset shadows, which keep contact
+// shadows welded where a depth bias would detach them), projected
+// into the cascade's texture space. The offset has to clear the whole
+// filter: 3 texels is the scaled 7x7 half-width, plus the sampling
+// snap, and the root two reaches the kernel's corner tap.
+float3 shadow_lookup(float4x4 cascadeMat, float3 wpos, float3 nn, f32 sinTheta,
+                     f32 scale, f32 texelWorld) {
+    f32 offset = (3.0f * scale + 0.5f) * 1.41421f * sinTheta * texelWorld;
+    float4 lc = mul(cascadeMat, float4{wpos.x + nn.x * offset,
+                                       wpos.y + nn.y * offset,
+                                       wpos.z + nn.z * offset, 1.0f});
+    return float3{lc.x / lc.w, lc.y / lc.w, lc.z / lc.w};
+}
+
+// The 7x7 uniform kernel from 16 bilinear comparison taps. Tap
+// positions and weights steer the hardware 2x2 compare so the fetches
+// reproduce the full 49-texel kernel with triangle-filtered sub-texel
+// placement: a moving shadow edge slides instead of stepping texel by
+// texel. The optimized PCF from The Witness (Ignacio Castano), via
+// MJP's shadows sample.
+struct PcfTaps {
+    f32 bx; f32 by;        // nearest texel corner, in UV
+    f32 step;              // one texel in UV, scaled for the cascade
+    f32 refz; f32 layer;
+    f32 u0; f32 u1; f32 u2; f32 u3;
+    f32 v0; f32 v1; f32 v2; f32 v3;
+    f32 uw0; f32 uw1; f32 uw2; f32 uw3;
+    f32 vw0; f32 vw1; f32 vw2; f32 vw3;
+    // Weight of the sampled result against fully lit. Zero past the
+    // kernel's reach outside the map, where nothing needs sampling.
+    // Inside, taps past a cascade edge compare against the sampler's
+    // white border and come back lit, so the boundary dissolves across
+    // the kernel rather than flipping whole pixels as the texel snap
+    // steps the map. WebGL2, WebGPU and iOS have no border mode and
+    // clamp to the edge texel instead; the fade over the band the
+    // kernel can reach past the edge stands in for the border there
+    // and changes little where the border exists.
+    f32 fade;
+}
+
+PcfTaps shadow_taps(float3 sp, f32 depthBias, f32 scale, f32 invSize, i32 cc) {
+    PcfTaps t;
+    t.fade = 0.0f;
+    // The 3 * scale here and in shadow_lookup both encode the 7x7
+    // kernel's three-texel radius.
+    f32 reach = (3.0f * scale + 1.0f) * invSize;
+    if sp.z < 0.0f || sp.z > 1.0f
+       || sp.x <= 0.0f - reach || sp.x >= 1.0f + reach
+       || sp.y <= 0.0f - reach || sp.y >= 1.0f + reach {
+        return t;
+    }
+    f32 edge = min(min(sp.x, 1.0f - sp.x), min(sp.y, 1.0f - sp.y));
+    t.fade = clamp((edge + reach) / (2.0f * reach), 0.0f, 1.0f);
+
+    f32 size = 1.0f / invSize;
+    t.layer = cast(f32, cc);
+    t.refz = sp.z - depthBias;
+    f32 tux = sp.x * size;
+    f32 tuy = sp.y * size;
+    f32 bx = floor(tux + 0.5f);
+    f32 by = floor(tuy + 0.5f);
+    f32 fs = tux + 0.5f - bx;
+    f32 ft = tuy + 0.5f - by;
+    t.bx = (bx - 0.5f) * invSize;
+    t.by = (by - 0.5f) * invSize;
+    t.step = invSize * scale;
+
+    t.uw0 = 5.0f * fs - 6.0f;
+    t.uw1 = 11.0f * fs - 28.0f;
+    t.uw2 = 0.0f - (11.0f * fs + 17.0f);
+    t.uw3 = 0.0f - (5.0f * fs + 1.0f);
+    t.u0 = (4.0f * fs - 5.0f) / t.uw0 - 3.0f;
+    t.u1 = (4.0f * fs - 16.0f) / t.uw1 - 1.0f;
+    t.u2 = 0.0f - (7.0f * fs + 5.0f) / t.uw2 + 1.0f;
+    t.u3 = 0.0f - fs / t.uw3 + 3.0f;
+
+    t.vw0 = 5.0f * ft - 6.0f;
+    t.vw1 = 11.0f * ft - 28.0f;
+    t.vw2 = 0.0f - (11.0f * ft + 17.0f);
+    t.vw3 = 0.0f - (5.0f * ft + 1.0f);
+    t.v0 = (4.0f * ft - 5.0f) / t.vw0 - 3.0f;
+    t.v1 = (4.0f * ft - 16.0f) / t.vw1 - 1.0f;
+    t.v2 = 0.0f - (7.0f * ft + 5.0f) / t.vw2 + 1.0f;
+    t.v3 = 0.0f - ft / t.vw3 + 3.0f;
+    return t;
+}
+
 @shader fragment
 float4 b3_fs(
     VsOut input,
@@ -117,44 +261,55 @@ float4 b3_fs(
     float3 nn = normalize(input.normal);
     f32 nl = max(dot(nn, float3{0.4880f, 0.7807f, 0.3904f}), 0.0f);
 
-    // Shadow lookup: pick the cascade by view depth, sample that layer.
-    // Anything outside every cascade stays lit.
-    float3 rel = float3{input.wpos.x - sh.camPos.x,
-                        input.wpos.y - sh.camPos.y,
-                        input.wpos.z - sh.camPos.z};
-    f32 viewZ = dot(rel, float3{sh.viewDir.x, sh.viewDir.y, sh.viewDir.z});
-    i32 c = 0;
-    if viewZ > sh.cascadeFar.x { c = 1; }
-    if viewZ > sh.cascadeFar.y { c = 2; }
-
+    // Shadow lookup: see shadow_select and shadow_taps above.
+    f32 viewZ = dot(float3{input.wpos.x - sh.camPos.x,
+                           input.wpos.y - sh.camPos.y,
+                           input.wpos.z - sh.camPos.z},
+                    float3{sh.viewDir.x, sh.viewDir.y, sh.viewDir.z});
+    ShadowSel sel = shadow_select(sh.cascadeFar, viewZ);
+    // Sine of the angle between surface and light: zero facing the sun,
+    // where no offset is wanted, growing toward grazing.
+    f32 sinTheta = sqrt(max(1.0f - nl * nl, 0.0f));
     f32 shadow = 1.0f;
-    float4 wp = float4{input.wpos.x, input.wpos.y, input.wpos.z, 1.0f};
-    float4 lc = mul(sh.cascade[c], wp);
-    if lc.w > 0.0f {
-        float3 sp = float3{lc.x / lc.w, lc.y / lc.w, lc.z / lc.w};
-        if sp.x > 0.0f && sp.x < 1.0f && sp.y > 0.0f && sp.y < 1.0f
-           && sp.z > 0.0f && sp.z < 1.0f {
-            // Slope-scaled bias in shadow-map depth units:
-            // tan(angle to the sun) = sqrt(1 - n.l^2) / n.l.
-            f32 ndl = clamp(nl, 0.001f, 1.0f);
-            f32 tanAngle = sqrt(1.0f - ndl * ndl) / ndl;
-            f32 zbias = clamp(0.001f * tanAngle, 0.0005f, 0.05f);
-            f32 refz = sp.z - zbias;
-            f32 tap = sh.shParams.x;
-            f32 layer = cast(f32, c);
-            f32 sum = 0.0f;
-            for i32 j = 0; j < 3; j++ {
-                for i32 i = 0; i < 3; i++ {
-                    float3 st = float3{sp.x + (cast(f32, i) - 1.0f) * tap,
-                                       sp.y + (cast(f32, j) - 1.0f) * tap,
-                                       layer};
-                    sum += sample_cmp(shadowMap, shadowSmp, st, refz);
-                }
+    for i32 k = 0; k < 2; k++ {
+        if k == 0 || sel.alpha > 0.0f {
+            i32 cc = sel.c + k;
+            f32 texelWorld = shadow_lane(sh.cascadeTexelWorld, cc);
+            // Shrink the kernel in the coarser cascades so the penumbra
+            // keeps a constant world width instead of going crisp to
+            // blurry at every boundary. The floor leaves the taps about
+            // two texels apart, close enough that the hardware 2x2
+            // compare still overlaps them.
+            f32 scale = clamp(sh.cascadeTexelWorld.x / texelWorld, 0.25f, 1.0f);
+            float3 sp = shadow_lookup(sh.cascade[cc], input.wpos, nn, sinTheta, scale, texelWorld);
+            PcfTaps tp = shadow_taps(sp, shadow_lane(sh.cascadeDepthBias, cc), scale, sh.shParams.x, cc);
+            f32 s = 1.0f;
+            if tp.fade > 0.0f {
+                f32 sum = 0.0f;
+                sum += tp.uw0 * tp.vw0 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u0 * tp.step, tp.by + tp.v0 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw1 * tp.vw0 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u1 * tp.step, tp.by + tp.v0 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw2 * tp.vw0 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u2 * tp.step, tp.by + tp.v0 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw3 * tp.vw0 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u3 * tp.step, tp.by + tp.v0 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw0 * tp.vw1 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u0 * tp.step, tp.by + tp.v1 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw1 * tp.vw1 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u1 * tp.step, tp.by + tp.v1 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw2 * tp.vw1 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u2 * tp.step, tp.by + tp.v1 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw3 * tp.vw1 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u3 * tp.step, tp.by + tp.v1 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw0 * tp.vw2 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u0 * tp.step, tp.by + tp.v2 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw1 * tp.vw2 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u1 * tp.step, tp.by + tp.v2 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw2 * tp.vw2 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u2 * tp.step, tp.by + tp.v2 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw3 * tp.vw2 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u3 * tp.step, tp.by + tp.v2 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw0 * tp.vw3 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u0 * tp.step, tp.by + tp.v3 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw1 * tp.vw3 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u1 * tp.step, tp.by + tp.v3 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw2 * tp.vw3 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u2 * tp.step, tp.by + tp.v3 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw3 * tp.vw3 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u3 * tp.step, tp.by + tp.v3 * tp.step, tp.layer}, tp.refz);
+                s = mix(1.0f, sum / 2704.0f, tp.fade);
             }
-            // shParams.y keeps shadowed faces from going fully black
-            shadow = sh.shParams.y + (1.0f - sh.shParams.y) * (sum / 9.0f);
+            if k == 0 { shadow = s; }
+            else { shadow = mix(shadow, s, sel.alpha); }
         }
     }
+    // shParams.y keeps shadowed faces from going fully black
+    shadow = sh.shParams.y + (1.0f - sh.shParams.y) * shadow;
 
     f32 lit = 0.35f + 0.65f * nl * shadow;
     float3 baseColor = float3{input.tint.x, input.tint.y, input.tint.z};
@@ -267,13 +422,36 @@ VsOut b3_inst_vs(
     return o;
 }
 
-// Capsule. Vertices store the unit direction in `normal` and that
-// direction offset by the cap sign along x in `position`, so a point
-// rebuilds as normal*radius + capSign*halfLength. Sized here rather
-// than by a model-matrix scale, which squashes the caps. params.y is
-// the half-length, params.z the radius.
+// Sphere and capsule impostors, after upstream shapes/sphere.glsl and
+// capsule.glsl. The vertex stage rasterizes the shape's oriented
+// bounding box; the fragment stage casts the eye ray at the exact
+// surface, so both shapes are round at any zoom and need no mesh. A
+// sphere is a capsule of zero half-length, so one shader serves both:
+// the cylinder part vanishes and the two cap spheres coincide. The
+// instance rows carry the rotation only; params.y is the half-length,
+// params.z the radius, params.w 1 for a sphere (three equator rings)
+// and 0 for a capsule (two).
+//
+// Writing depth from the fragment shader turns off early depth
+// rejection for these pipelines. Accepted for impostors, as upstream.
+struct ImpOut {
+    float4 pos;
+    float3 wpos;            // proxy surface point, eye-relative
+    @flat float3 center;
+    @flat float3 rrow0;     // rotation rows; their columns are R^T's rows
+    @flat float3 rrow1;
+    @flat float3 rrow2;
+    @flat float4 tint;
+    @flat float4 params;
+}
+
+struct ImpFrag {
+    float4 color;
+    @depth f32 depth;
+}
+
 @shader vertex
-VsOut b3_inst_cap_vs(
+ImpOut b3_imp_vs(
     @attr(0) float3 position,
     @attr(1) float3 normal,
     @attr(2) float4 irow0,
@@ -285,20 +463,173 @@ VsOut b3_inst_cap_vs(
 ) {
     f32 halfLen = iparams.y;
     f32 radius = iparams.z;
-    f32 capOff = position.x >= 0.0f ? halfLen : 0.0f - halfLen;
-    float3 lp = float3{normal.x * radius + capOff, normal.y * radius, normal.z * radius};
+    // unit-cube corners at half-extent 0.5, scaled to the box that
+    // encloses the shape about its local +X axis
+    float3 lp = float3{position.x * 2.0f * (halfLen + radius),
+                       position.y * 2.0f * radius,
+                       position.z * 2.0f * radius};
     f32 wx = irow0.x * lp.x + irow0.y * lp.y + irow0.z * lp.z + irow0.w;
     f32 wy = irow1.x * lp.x + irow1.y * lp.y + irow1.z * lp.z + irow1.w;
     f32 wz = irow2.x * lp.x + irow2.y * lp.y + irow2.z * lp.z + irow2.w;
-    VsOut o;
+    ImpOut o;
     o.pos = mul(u.viewproj, float4{wx, wy, wz, 1.0f});
-    o.normal = normalize(float3{
-        irow0.x * normal.x + irow0.y * normal.y + irow0.z * normal.z,
-        irow1.x * normal.x + irow1.y * normal.y + irow1.z * normal.z,
-        irow2.x * normal.x + irow2.y * normal.y + irow2.z * normal.z});
-    o.tint = itint;
     o.wpos = float3{wx, wy, wz};
-    o.cell = 0.0f;
+    o.center = float3{irow0.w, irow1.w, irow2.w};
+    o.rrow0 = float3{irow0.x, irow0.y, irow0.z};
+    o.rrow1 = float3{irow1.x, irow1.y, irow1.z};
+    o.rrow2 = float3{irow2.x, irow2.y, irow2.z};
+    o.tint = itint;
+    o.params = iparams;
+    return o;
+}
+
+@shader fragment
+ImpFrag b3_imp_fs(
+    ImpOut input,
+    @uniform(1) ShadowUni sh,
+    @texture(0) Texture2DArray shadowMap,
+    @sampler(0) Sampler shadowSmp
+) {
+    // The eye is the origin of the frame the GPU sees, so the ray starts
+    // there and the proxy point is its direction.
+    float3 rd = normalize(input.wpos);
+    f32 halfLen = input.params.y;
+    f32 radius = input.params.z;
+    // local +X in world is the first column of R
+    float3 axis = float3{input.rrow0.x, input.rrow1.x, input.rrow2.x};
+    float3 pa = float3{input.center.x - halfLen * axis.x,
+                       input.center.y - halfLen * axis.y,
+                       input.center.z - halfLen * axis.z};
+    float3 pb = float3{input.center.x + halfLen * axis.x,
+                       input.center.y + halfLen * axis.y,
+                       input.center.z + halfLen * axis.z};
+
+    // Ray-cylinder, Quilez closed form, with the origin at zero.
+    // Reference: https://iquilezles.org/articles/intersectors/
+    float3 ba = float3{pb.x - pa.x, pb.y - pa.y, pb.z - pa.z};
+    float3 oa = float3{0.0f - pa.x, 0.0f - pa.y, 0.0f - pa.z};
+    f32 baba = dot(ba, ba);
+    f32 bard = dot(ba, rd);
+    f32 baoa = dot(ba, oa);
+    f32 rdoa = dot(rd, oa);
+    f32 oaoa = dot(oa, oa);
+    f32 ac = baba - bard * bard;
+    f32 bc = baba * rdoa - baoa * bard;
+    f32 cc2 = baba * oaoa - baoa * baoa - radius * radius * baba;
+    f32 hc = bc * bc - ac * cc2;
+
+    f32 t = 0.0f - 1.0f;
+    float3 n = float3{0.0f, 0.0f, 0.0f};
+    // ac collapses when the ray runs along the axis and baba when the
+    // half-length is zero; the caps cover both.
+    if hc >= 0.0f && ac > 0.00000001f {
+        f32 tb = (0.0f - bc - sqrt(hc)) / ac;
+        f32 y = baoa + tb * bard;
+        if tb > 0.0f && y > 0.0f && y < baba {
+            float3 hit = float3{rd.x * tb, rd.y * tb, rd.z * tb};
+            f32 f = y / baba;
+            float3 axisPt = float3{pa.x + ba.x * f, pa.y + ba.y * f, pa.z + ba.z * f};
+            n = float3{(hit.x - axisPt.x) / radius, (hit.y - axisPt.y) / radius, (hit.z - axisPt.z) / radius};
+            t = tb;
+        }
+    }
+    // Cap spheres at both ends, keeping the nearer hit. Only the half
+    // of each cap outside the cylinder is a surface.
+    for i32 i = 0; i < 2; i++ {
+        float3 p = i == 0 ? pa : pb;
+        f32 side = i == 0 ? 0.0f - 1.0f : 1.0f;
+        float3 oc = float3{0.0f - p.x, 0.0f - p.y, 0.0f - p.z};
+        f32 b = dot(oc, rd);
+        f32 c = dot(oc, oc) - radius * radius;
+        f32 h = b * b - c;
+        if h >= 0.0f {
+            f32 tc = 0.0f - b - sqrt(h);
+            if tc > 0.0f && (t < 0.0f || tc < t) {
+                float3 hit = float3{rd.x * tc, rd.y * tc, rd.z * tc};
+                float3 hp = float3{hit.x - p.x, hit.y - p.y, hit.z - p.z};
+                if dot(hp, axis) * side >= 0.0f {
+                    n = float3{hp.x / radius, hp.y / radius, hp.z / radius};
+                    t = tc;
+                }
+            }
+        }
+    }
+    if t < 0.0f {
+        // box corner past the silhouette, or the shape behind the eye
+        discard;
+    }
+
+    float3 hit = float3{rd.x * t, rd.y * t, rd.z * t};
+    float3 nn = normalize(n);
+
+    // Object-space normal via R^T, for the surface pattern: a north/
+    // south hemisphere split and great-circle rings at the equators of
+    // the object axes, so spin is visible. fwidth on the signed
+    // component keeps each ring about 1.5 px wide at any zoom; abs has
+    // a kink at the equator that would speckle it.
+    float3 nObj = float3{
+        input.rrow0.x * nn.x + input.rrow1.x * nn.y + input.rrow2.x * nn.z,
+        input.rrow0.y * nn.x + input.rrow1.y * nn.y + input.rrow2.y * nn.z,
+        input.rrow0.z * nn.x + input.rrow1.z * nn.y + input.rrow2.z * nn.z};
+    f32 hemi = nObj.y > 0.0f ? 1.0f : 0.65f;
+    f32 ringY = 1.0f - smoothstep(0.0f, fwidth(nObj.y) * 1.5f, abs(nObj.y));
+    f32 ringZ = 1.0f - smoothstep(0.0f, fwidth(nObj.z) * 1.5f, abs(nObj.z));
+    f32 ring = max(ringY, ringZ);
+    if input.params.w > 0.5f {
+        f32 ringX = 1.0f - smoothstep(0.0f, fwidth(nObj.x) * 1.5f, abs(nObj.x));
+        ring = max(ring, ringX);
+    }
+    float3 base = float3{input.tint.x * hemi, input.tint.y * hemi, input.tint.z * hemi};
+    float3 surface = mix(base, base * 0.35f, ring);
+
+    // sun dir: upstream renderer's normalize(0.5, 0.8, 0.4)
+    f32 nl = max(dot(nn, float3{0.4880f, 0.7807f, 0.3904f}), 0.0f);
+
+    // Shadow lookup: see shadow_select and shadow_taps above.
+    f32 viewZ = dot(hit, float3{sh.viewDir.x, sh.viewDir.y, sh.viewDir.z});
+    ShadowSel sel = shadow_select(sh.cascadeFar, viewZ);
+    f32 sinTheta = sqrt(max(1.0f - nl * nl, 0.0f));
+    f32 shadow = 1.0f;
+    for i32 k = 0; k < 2; k++ {
+        if k == 0 || sel.alpha > 0.0f {
+            i32 cc = sel.c + k;
+            f32 texelWorld = shadow_lane(sh.cascadeTexelWorld, cc);
+            f32 scale = clamp(sh.cascadeTexelWorld.x / texelWorld, 0.25f, 1.0f);
+            float3 sp = shadow_lookup(sh.cascade[cc], hit, nn, sinTheta, scale, texelWorld);
+            PcfTaps tp = shadow_taps(sp, shadow_lane(sh.cascadeDepthBias, cc), scale, sh.shParams.x, cc);
+            f32 s = 1.0f;
+            if tp.fade > 0.0f {
+                f32 sum = 0.0f;
+                sum += tp.uw0 * tp.vw0 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u0 * tp.step, tp.by + tp.v0 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw1 * tp.vw0 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u1 * tp.step, tp.by + tp.v0 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw2 * tp.vw0 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u2 * tp.step, tp.by + tp.v0 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw3 * tp.vw0 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u3 * tp.step, tp.by + tp.v0 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw0 * tp.vw1 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u0 * tp.step, tp.by + tp.v1 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw1 * tp.vw1 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u1 * tp.step, tp.by + tp.v1 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw2 * tp.vw1 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u2 * tp.step, tp.by + tp.v1 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw3 * tp.vw1 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u3 * tp.step, tp.by + tp.v1 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw0 * tp.vw2 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u0 * tp.step, tp.by + tp.v2 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw1 * tp.vw2 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u1 * tp.step, tp.by + tp.v2 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw2 * tp.vw2 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u2 * tp.step, tp.by + tp.v2 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw3 * tp.vw2 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u3 * tp.step, tp.by + tp.v2 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw0 * tp.vw3 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u0 * tp.step, tp.by + tp.v3 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw1 * tp.vw3 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u1 * tp.step, tp.by + tp.v3 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw2 * tp.vw3 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u2 * tp.step, tp.by + tp.v3 * tp.step, tp.layer}, tp.refz);
+                sum += tp.uw3 * tp.vw3 * sample_cmp(shadowMap, shadowSmp, float3{tp.bx + tp.u3 * tp.step, tp.by + tp.v3 * tp.step, tp.layer}, tp.refz);
+                s = mix(1.0f, sum / 2704.0f, tp.fade);
+            }
+            if k == 0 { shadow = s; }
+            else { shadow = mix(shadow, s, sel.alpha); }
+        }
+    }
+    shadow = sh.shParams.y + (1.0f - sh.shParams.y) * shadow;
+    f32 lit = 0.35f + 0.65f * nl * shadow;
+
+    ImpFrag o;
+    o.color = float4{surface.x * lit, surface.y * lit, surface.z * lit, 1.0f};
+    // The proxy's depth is the box face; the surface sits behind it.
+    float4 hp4 = float4{hit.x, hit.y, hit.z, 1.0f};
+    o.depth = dot(sh.clipZ, hp4) / dot(sh.clipW, hp4) * sh.depthRemap.x + sh.depthRemap.y;
     return o;
 }
 
@@ -322,8 +653,34 @@ EdgeOut b3_inst_depth_vs(
     return o;
 }
 
+// Impostor shadow casters, after upstream shadow_caster_sphere.glsl
+// and shadow_caster_capsule.glsl. The same box as the lit impostor,
+// ray-cast along the light so caster and receiver agree on where the
+// surface is. Only the entry point matters, not the normal: the
+// capsule is the union of a cylinder and two cap spheres, and the
+// entry into a union is the nearest entry across its parts, so the
+// hemisphere rejection the lit shader needs is unnecessary.
+struct ImpDepthOut {
+    float4 pos;
+    float3 wpos;            // proxy surface point
+    @flat float3 center;
+    @flat float3 axis;      // local +X in world
+    @flat float4 params;
+}
+
+struct ImpDepthFrag {
+    float4 color;           // no target is bound; the pipeline is depth-only
+    @depth f32 depth;
+}
+
+// Per-cascade data for the caster fragment stage.
+struct CasterPass {
+    float4 lightDir;        // xyz: direction the light travels
+    float4 depthRow;        // world position to window depth, w = 1
+}
+
 @shader vertex
-EdgeOut b3_inst_cap_depth_vs(
+ImpDepthOut b3_imp_depth_vs(
     @attr(0) float3 position,
     @attr(1) float3 normal,
     @attr(2) float4 irow0,
@@ -335,14 +692,86 @@ EdgeOut b3_inst_cap_depth_vs(
 ) {
     f32 halfLen = iparams.y;
     f32 radius = iparams.z;
-    f32 capOff = position.x >= 0.0f ? halfLen : 0.0f - halfLen;
-    float3 lp = float3{normal.x * radius + capOff, normal.y * radius, normal.z * radius};
+    float3 lp = float3{position.x * 2.0f * (halfLen + radius),
+                       position.y * 2.0f * radius,
+                       position.z * 2.0f * radius};
     f32 wx = irow0.x * lp.x + irow0.y * lp.y + irow0.z * lp.z + irow0.w;
     f32 wy = irow1.x * lp.x + irow1.y * lp.y + irow1.z * lp.z + irow1.w;
     f32 wz = irow2.x * lp.x + irow2.y * lp.y + irow2.z * lp.z + irow2.w;
-    EdgeOut o;
+    ImpDepthOut o;
     o.pos = mul(u.viewproj, float4{wx, wy, wz, 1.0f});
-    o.tint = itint;
+    o.wpos = float3{wx, wy, wz};
+    o.center = float3{irow0.w, irow1.w, irow2.w};
+    o.axis = float3{irow0.x, irow1.x, irow2.x};
+    o.params = iparams;
+    return o;
+}
+
+@shader fragment
+ImpDepthFrag b3_imp_depth_fs(ImpDepthOut input, @uniform(1) CasterPass cp) {
+    // The light is directional, so every ray is parallel: it starts on
+    // the proxy face and travels with the light.
+    float3 ro = input.wpos;
+    float3 rd = float3{cp.lightDir.x, cp.lightDir.y, cp.lightDir.z};
+    f32 halfLen = input.params.y;
+    f32 radius = input.params.z;
+    float3 axis = input.axis;
+    float3 pa = float3{input.center.x - halfLen * axis.x,
+                       input.center.y - halfLen * axis.y,
+                       input.center.z - halfLen * axis.z};
+    float3 pb = float3{input.center.x + halfLen * axis.x,
+                       input.center.y + halfLen * axis.y,
+                       input.center.z + halfLen * axis.z};
+
+    float3 ba = float3{pb.x - pa.x, pb.y - pa.y, pb.z - pa.z};
+    float3 oa = float3{ro.x - pa.x, ro.y - pa.y, ro.z - pa.z};
+    f32 baba = dot(ba, ba);
+    f32 bard = dot(ba, rd);
+    f32 baoa = dot(ba, oa);
+    f32 rdoa = dot(rd, oa);
+    f32 oaoa = dot(oa, oa);
+    f32 ac = baba - bard * bard;
+    f32 bc = baba * rdoa - baoa * bard;
+    f32 cc2 = baba * oaoa - baoa * baoa - radius * radius * baba;
+    f32 hc = bc * bc - ac * cc2;
+
+    f32 t = 0.0f - 1.0f;
+    // Entry into each part, clamped forward rather than rejected. The
+    // proxy faces are tangent to the surface along a line, and rounding
+    // there puts the origin a hair inside, which drives the near root
+    // negative. Treating that as a miss punches a dashed hole down the
+    // middle of the shadow. A part whose far root is behind us too is a
+    // genuine miss, which is what the end faces need.
+    if hc >= 0.0f && ac > 0.00000001f {
+        f32 q = sqrt(hc);
+        if 0.0f - bc + q >= 0.0f {
+            f32 tb = max((0.0f - bc - q) / ac, 0.0f);
+            f32 y = baoa + tb * bard;
+            if y > 0.0f && y < baba { t = tb; }
+        }
+    }
+    for i32 i = 0; i < 2; i++ {
+        float3 p = i == 0 ? pa : pb;
+        float3 oc = float3{ro.x - p.x, ro.y - p.y, ro.z - p.z};
+        f32 b = dot(oc, rd);
+        f32 c = dot(oc, oc) - radius * radius;
+        f32 h = b * b - c;
+        if h >= 0.0f {
+            f32 q = sqrt(h);
+            if 0.0f - b + q >= 0.0f {
+                f32 tc = max(0.0f - b - q, 0.0f);
+                if t < 0.0f || tc < t { t = tc; }
+            }
+        }
+    }
+    if t < 0.0f {
+        // box corner, the ray clears the shape
+        discard;
+    }
+    ImpDepthFrag o;
+    o.color = float4{0.0f, 0.0f, 0.0f, 1.0f};
+    // orthographic light, so the clip w is 1 and the divide drops out
+    o.depth = dot(cp.depthRow, float4{ro.x + t * rd.x, ro.y + t * rd.y, ro.z + t * rd.z, 1.0f});
     return o;
 }
 
@@ -556,147 +985,41 @@ float4 b3_sky_fs(SkyOut input) {
     return float4{clamp(r, 0.0f, 1.0f), clamp(g, 0.0f, 1.0f), clamp(b, 0.0f, 1.0f), 1.0f};
 }
 
-// --- meshes ---------------------------------------------------------
+// --- proxy cube --------------------------------------------------------
 
-// Unit cube, per-face normals: 24 verts x (pos3 + normal3), 36 indices.
-i32[36] g_cube_idx;
-// face outlines: 4 lines per face (shared cube edges draw twice)
-i32[48] g_cube_line_idx;
-// Icosphere (1 subdivision, flat-shaded): 80 faces x 3 verts.
-f32[240 * 6] g_sph_verts;
-i32 g_sph_nverts;
+// The impostors rasterize a unit cube, half-extent 0.5, in the same
+// pos3 + normal3 layout the meshes use. 36 vertices, outward faces
+// wound counter-clockwise, so the back-culled pipelines keep the faces
+// toward the viewer or the light.
+const i32 PROXY_NVERTS = 36;
+f32[PROXY_NVERTS * 6] g_proxy_verts;
 
-f32[36] g_ico_v;     // 12 base verts x 3
-
-void sph_emit_tri(f32 ax, f32 ay, f32 az, f32 bx, f32 by, f32 bz, f32 cx, f32 cy, f32 cz) {
-    f32 nx = (ax + bx + cx) / 3.0f;
-    f32 ny = (ay + by + cy) / 3.0f;
-    f32 nz = (az + bz + cz) / 3.0f;
-    f32 nl = sqrtf(nx * nx + ny * ny + nz * nz);
-    nx /= nl; ny /= nl; nz /= nl;
-    i32 v = g_sph_nverts * 6;
-    g_sph_verts[v..] = { ax, ay, az, nx, ny, nz,
-                         bx, by, bz, nx, ny, nz,
-                         cx, cy, cz, nx, ny, nz };
-    g_sph_nverts += 3;
-}
-
-void sph_norm(f32* x, f32* y, f32* z) {
-    f32 l = sqrtf(*x * *x + *y * *y + *z * *z);
-    *x /= l; *y /= l; *z /= l;
-}
-
-void sph_subdiv(f32 ax, f32 ay, f32 az, f32 bx, f32 by, f32 bz, f32 cx, f32 cy, f32 cz) {
-    f32 abx = (ax + bx) * 0.5f; f32 aby = (ay + by) * 0.5f; f32 abz = (az + bz) * 0.5f;
-    f32 bcx = (bx + cx) * 0.5f; f32 bcy = (by + cy) * 0.5f; f32 bcz = (bz + cz) * 0.5f;
-    f32 cax = (cx + ax) * 0.5f; f32 cay = (cy + ay) * 0.5f; f32 caz = (cz + az) * 0.5f;
-    sph_norm(&abx, &aby, &abz);
-    sph_norm(&bcx, &bcy, &bcz);
-    sph_norm(&cax, &cay, &caz);
-    sph_emit_tri(ax, ay, az, abx, aby, abz, cax, cay, caz);
-    sph_emit_tri(bx, by, bz, bcx, bcy, bcz, abx, aby, abz);
-    sph_emit_tri(cx, cy, cz, cax, cay, caz, bcx, bcy, bcz);
-    sph_emit_tri(abx, aby, abz, bcx, bcy, bcz, cax, cay, caz);
-}
-
-void build_sphere() {
-    f32 t = (1.0f + sqrtf(5.0f)) * 0.5f;
-    g_ico_v[0..] = { -1.0f,t,0.0f,  1.0f,t,0.0f,  -1.0f,-t,0.0f,  1.0f,-t,0.0f,
-                     0.0f,-1.0f,t,  0.0f,1.0f,t,  0.0f,-1.0f,-t,  0.0f,1.0f,-t,
-                     t,0.0f,-1.0f,  t,0.0f,1.0f,  -t,0.0f,-1.0f,  -t,0.0f,1.0f };
-    for i32 i = 0; i < 12; i++ {
-        f32* px = &g_ico_v[i * 3];
-        sph_norm(px, px + 1, px + 2);
-    }
-    i32[60] faces = { 0,11,5, 0,5,1, 0,1,7, 0,7,10, 0,10,11,
-                      1,5,9, 5,11,4, 11,10,2, 10,7,6, 7,1,8,
-                      3,9,4, 3,4,2, 3,2,6, 3,6,8, 3,8,9,
-                      4,9,5, 2,4,11, 6,2,10, 8,6,7, 9,8,1 };
-    g_sph_nverts = 0;
-    for i32 f = 0; f < 20; f++ {
-        i32 a = faces[f * 3] * 3;
-        i32 b = faces[f * 3 + 1] * 3;
-        i32 c = faces[f * 3 + 2] * 3;
-        sph_subdiv(g_ico_v[a], g_ico_v[a + 1], g_ico_v[a + 2],
-                   g_ico_v[b], g_ico_v[b + 1], g_ico_v[b + 2],
-                   g_ico_v[c], g_ico_v[c + 1], g_ico_v[c + 2]);
+void proxy_face(i32 face, f32 nx, f32 ny, f32 nz, f32 ux, f32 uy, f32 uz, f32 vx, f32 vy, f32 vz) {
+    // corners c = 0.5 * (n + s * u + t * v), two triangles
+    f32[4] sx = { -1.0f, 1.0f, 1.0f, -1.0f };
+    f32[4] tx = { -1.0f, -1.0f, 1.0f, 1.0f };
+    i32[6] order = { 0, 1, 2, 0, 2, 3 };
+    for i32 i = 0; i < 6; i++ {
+        f32 s = sx[order[i]];
+        f32 tt = tx[order[i]];
+        i32 v = (face * 6 + i) * 6;
+        g_proxy_verts[v..] = { 0.5f * (nx + s * ux + tt * vx),
+                               0.5f * (ny + s * uy + tt * vy),
+                               0.5f * (nz + s * uz + tt * vz),
+                               nx, ny, nz };
     }
 }
 
-// Unit capsule along x: two hemispheres of radius 1 centred at
-// x = +/-1 plus the band joining them. b3_cap_vs rebuilds the real
-// point from the normal and position together.
-const i32 CAP_SEGS = 16;    // longitude steps
-const i32 CAP_RINGS = 4;    // rings per hemisphere
-f32[900 * 6] g_cap_verts;
-i32 g_cap_nverts;
-
-void cap_v(f32 ux, f32 uy, f32 uz, f32 cap) {
-    i32 v = g_cap_nverts * 6;
-    g_cap_verts[v..] = { ux + cap, uy, uz, ux, uy, uz };
-    g_cap_nverts++;
+void build_proxy_cube() {
+    // (u, v) chosen so u x v = n, which makes the winding counter-clockwise
+    // seen from outside
+    proxy_face(0,  1.0f, 0.0f, 0.0f,   0.0f, 1.0f, 0.0f,   0.0f, 0.0f, 1.0f);
+    proxy_face(1, -1.0f, 0.0f, 0.0f,   0.0f, 0.0f, 1.0f,   0.0f, 1.0f, 0.0f);
+    proxy_face(2,  0.0f, 1.0f, 0.0f,   0.0f, 0.0f, 1.0f,   1.0f, 0.0f, 0.0f);
+    proxy_face(3,  0.0f, -1.0f, 0.0f,  1.0f, 0.0f, 0.0f,   0.0f, 0.0f, 1.0f);
+    proxy_face(4,  0.0f, 0.0f, 1.0f,   1.0f, 0.0f, 0.0f,   0.0f, 1.0f, 0.0f);
+    proxy_face(5,  0.0f, 0.0f, -1.0f,  0.0f, 1.0f, 0.0f,   1.0f, 0.0f, 0.0f);
 }
-
-void build_capsule() {
-    g_cap_nverts = 0;
-    f32 dphi = 2.0f * PI_F / cast(f32, CAP_SEGS);
-    f32 dth = 0.5f * PI_F / cast(f32, CAP_RINGS);
-    for i32 hemi = 0; hemi < 2; hemi++ {
-        f32 cap = hemi == 0 ? 1.0f : 0.0f - 1.0f;
-        for i32 i = 0; i < CAP_RINGS; i++ {
-            f32 t0 = cast(f32, i) * dth;
-            f32 t1 = cast(f32, i + 1) * dth;
-            f32 x0 = cap * cosf(t0);
-            f32 x1 = cap * cosf(t1);
-            f32 r0 = sinf(t0);
-            f32 r1 = sinf(t1);
-            for i32 j = 0; j < CAP_SEGS; j++ {
-                f32 p0 = cast(f32, j) * dphi;
-                f32 p1 = cast(f32, j + 1) * dphi;
-                f32 c0 = cosf(p0); f32 s0 = sinf(p0);
-                f32 c1 = cosf(p1); f32 s1 = sinf(p1);
-                // A(t0,p0) B(t0,p1) C(t1,p1) D(t1,p0). The +x hemisphere
-                // needs the reversed winding of the -x one. The i == 0
-                // ring degenerates at the pole and rasterizes nothing.
-                if hemi == 0 {
-                    cap_v(x0, r0 * c0, r0 * s0, cap);
-                    cap_v(x1, r1 * c1, r1 * s1, cap);
-                    cap_v(x0, r0 * c1, r0 * s1, cap);
-
-                    cap_v(x0, r0 * c0, r0 * s0, cap);
-                    cap_v(x1, r1 * c0, r1 * s0, cap);
-                    cap_v(x1, r1 * c1, r1 * s1, cap);
-                } else {
-                    cap_v(x0, r0 * c0, r0 * s0, cap);
-                    cap_v(x0, r0 * c1, r0 * s1, cap);
-                    cap_v(x1, r1 * c1, r1 * s1, cap);
-
-                    cap_v(x0, r0 * c0, r0 * s0, cap);
-                    cap_v(x1, r1 * c1, r1 * s1, cap);
-                    cap_v(x1, r1 * c0, r1 * s0, cap);
-                }
-            }
-        }
-    }
-    // band between the two equators
-    for i32 j = 0; j < CAP_SEGS; j++ {
-        f32 p0 = cast(f32, j) * dphi;
-        f32 p1 = cast(f32, j + 1) * dphi;
-        f32 c0 = cosf(p0); f32 s0 = sinf(p0);
-        f32 c1 = cosf(p1); f32 s1 = sinf(p1);
-        cap_v(0.0f, c0, s0, 0.0f - 1.0f);
-        cap_v(0.0f, c1, s1, 1.0f);
-        cap_v(0.0f, c0, s0, 1.0f);
-
-        cap_v(0.0f, c0, s0, 0.0f - 1.0f);
-        cap_v(0.0f, c1, s1, 0.0f - 1.0f);
-        cap_v(0.0f, c1, s1, 1.0f);
-    }
-}
-
-const i32 DRAW_BOX = 0;
-const i32 DRAW_SPHERE = 1;
-const i32 DRAW_CAPSULE = 2;
 
 // upstream debug_adapter.h BOX3D_GROUND_GRID_CELL_SIZE: world-space
 // size of a minor grid cell, major lines every 10 inside the shader
@@ -714,10 +1037,10 @@ void set_ground_shape(b3ShapeId shapeId) {
 
 // --- shadow map ------------------------------------------------------
 //
-// Three cascades, refitted to the camera each frame. Scenes here span
+// Four cascades, refitted to the camera each frame. Scenes here span
 // roughly 400x in scale, so one fixed region does not fit all.
 
-// The array costs SHADOW_DIM^2 * SHADOW_CASCADES * 4 bytes: 192 MB at
+// The array costs SHADOW_DIM^2 * SHADOW_CASCADES * 4 bytes: 256 MB at
 // 4096. WebGL2 follows GLES 3.0, which guarantees a maximum texture size
 // of only 2048, so the web build uses that.
 when os(wasm) {
@@ -734,11 +1057,6 @@ sg_buffer g_dbg_vbuf;
 // hull outlines: the edge shader, non-indexed
 sg_pipeline g_pip_lines_ns;
 
-// PCF tap spacing in texels. Each tap is a bilinear 2x2 through the
-// comparison sampler, so 3x3 taps at spacing S spread over (2 + 2S)
-// texels: blur radius 1 + S. Below about 0.5 the taps stop
-// antialiasing the edge.
-const f32 SHADOW_PCF_SPACING = 0.75f;
 sg_image g_shadow_img;
 sg_view[SHADOW_CASCADES] g_shadow_att;   // one depth attachment per slice
 sg_view g_shadow_tex;      // texture view over the whole array
@@ -746,6 +1064,8 @@ sg_sampler g_shadow_smp;   // comparison sampler
 float4x4[SHADOW_CASCADES] g_light_clip;   // world -> light clip (depth pass)
 float4x4[SHADOW_CASCADES] g_light_mat;    // world -> shadow texture space
 f32[SHADOW_CASCADES] g_cascade_far;       // far view depth of each cascade
+f32[SHADOW_CASCADES] g_cascade_texel;     // one shadow texel in world units
+f32[SHADOW_CASCADES] g_cascade_bias;      // residual comparison bias, depth units
 
 // Orthographic projection, column-major, matching linear.mc's
 // per-target clip-space convention (D3D/Metal z in [0,1], GL z in
@@ -793,36 +1113,91 @@ float4x4 clip_to_texture() {
     };
 }
 
-// upstream gfx/shadow.{h,c}: the cascade range is the scene's, not the
-// camera's — sample.cpp fits far to the world bounds diagonal.
-const f32 SHADOW_SPLIT_NEAR = 0.1f;
-// Room on the light's near side for casters standing above a cascade slice.
-const f32 CASTER_MARGIN = 50.0f;
-const f32 SHADOW_SPLIT_FAR = 50.0f;
-const f32 SHADOW_SPLIT_FAR_MAX = 200.0f;
-const f32 PSSM_LAMBDA = 0.5f;
-const f32 PSSM_LAMBDA_MAX = 0.9f;
-f32 g_shadow_split_far = SHADOW_SPLIT_FAR;
-
-// Toward log as the range widens, so the near cascade stays tight.
-f32 split_lambda_for_range(f32 nearZ, f32 farZ) {
-    f32 decades = logf((farZ / nearZ) / (SHADOW_SPLIT_FAR / SHADOW_SPLIT_NEAR)) / logf(10.0f);
-    return b3ClampFloat(PSSM_LAMBDA + 0.4f * decades, PSSM_LAMBDA, PSSM_LAMBDA_MAX);
+// Clip depth to window depth for the target: D3D and Metal rasterize
+// clip z in [0,1] as is, GL maps [-1,1] onto it. The impostors write
+// their depth from the fragment stage and need the same mapping.
+float4 clip_depth_remap() {
+    f32 scale = 1.0f;
+    f32 offset = 0.0f;
+    when os(linux) || os(wasm) || os(android) {
+        scale = 0.5f;
+        offset = 0.5f;
+    }
+    return float4{scale, offset, 0.0f, 0.0f};
 }
 
-// Fit one cascade to the view slice between near and far. The bounding
-// sphere's radius depends only on the slice depths and the field of
-// view, not on where the camera points, so texel size holds still as
-// the camera turns.
-void fit_cascade(i32 index, f32 nearZ, f32 farZ) {
-    float3 sun = float3{0.4880f, 0.7807f, 0.3904f};
+// upstream gfx/shadow.{h,c}. The split range is a pair of view-space
+// distances the cascades are distributed over. The near end sits
+// nowhere near the camera near plane on purpose: it says where the
+// split distribution starts, not where shadows start. The first
+// cascade's bounding sphere reaches back past the eye whatever this
+// is, so close content is covered either way. Starting at working
+// distance puts the whole volume being looked at inside the first
+// cascade, rather than spending it on the metre in front of the lens
+// and leaving two boundaries in the middle of the scene.
+const f32 SHADOW_SPLIT_NEAR = 10.0f;
+const f32 SHADOW_SPLIT_FAR = 50.0f;
+// Ceiling on widening the far end to a scene. The last cascade always
+// has to reach the far split, so its texel size is set by this number
+// alone. A scene that needs more reach asks for it in its SampleDef
+// rather than having it inferred from how big its ground is.
+const f32 SHADOW_SPLIT_FAR_MAX = 80.0f;
+// Blend between the uniform split scheme (each cascade covers an equal
+// slice of distance) and the logarithmic one (an equal multiplicative
+// step). 0.5 is the standard sweet spot; raising it tightens the near
+// cascades but drags every boundary toward the camera.
+const f32 PSSM_LAMBDA = 0.5f;
+// Room on the light's near side for casters standing above a cascade slice.
+const f32 CASTER_MARGIN = 50.0f;
+// What remains of the comparison bias once the lookup is offset along
+// the surface normal: it only has to cover depth quantization, so it
+// is measured in texels of the cascade that owns it.
+const f32 DEPTH_BIAS_TEXELS = 0.5f;
+// The sun, normalize(0.5, 0.8, 0.4), shared with the lit shader.
+const f32 SUN_X = 0.4880f;
+const f32 SUN_Y = 0.7807f;
+const f32 SUN_Z = 0.3904f;
+
+f32 g_shadow_split_near = SHADOW_SPLIT_NEAR;
+f32 g_shadow_split_far = SHADOW_SPLIT_FAR;
+f32 g_shadow_split_lambda = PSSM_LAMBDA;
+
+void set_shadow_splits(f32 nearZ, f32 farZ) {
+    if nearZ <= 0.0f || farZ <= nearZ {
+        nearZ = SHADOW_SPLIT_NEAR;
+        farZ = SHADOW_SPLIT_FAR;
+    }
+    g_shadow_split_near = nearZ;
+    g_shadow_split_far = farZ;
+}
+
+void set_shadow_split_lambda(f32 lambda) {
+    g_shadow_split_lambda = b3ClampFloat(lambda, 0.0f, 1.0f);
+}
+
+// Boundary i of the split scheme, i in 0..SHADOW_CASCADES.
+f32 split_distance(i32 i) {
+    f32 nearZ = g_shadow_split_near;
+    f32 farZ = g_shadow_split_far;
+    f32 fi = cast(f32, i) / cast(f32, SHADOW_CASCADES);
+    f32 u = nearZ + (farZ - nearZ) * fi;
+    f32 l = nearZ * powf(farZ / nearZ, fi);
+    return g_shadow_split_lambda * l + (1.0f - g_shadow_split_lambda) * u;
+}
+
+// Bound the view slice between near and far by a sphere: centroid of
+// its eight corners plus the largest distance to any of them. The
+// radius depends only on the slice depths and the field of view, not
+// on where the camera points, so texel size holds still as the camera
+// turns. Eye-relative, like everything else the GPU sees: the eye is
+// the draw origin, so it contributes nothing here.
+void slice_bounding_sphere(f32 nearZ, f32 farZ, float3* centreOut, f32* radiusOut) {
     f32 tanHalf = tanf(0.5f * 60.0f * PI_F / 180.0f);
     f32 w = sapp_widthf();
     f32 h = sapp_heightf();
     f32 aspect = h > 0.0f ? w / h : 1.0f;
     float3 vdir = float3{0.0f - cam_forward.x, 0.0f - cam_forward.y, 0.0f - cam_forward.z};
 
-    // bound the slice by its eight corners
     f32[8] cx; f32[8] cy; f32[8] cz;
     float3 centre = float3{0.0f, 0.0f, 0.0f};
     i32 n = 0;
@@ -834,8 +1209,6 @@ void fit_cascade(i32 index, f32 nearZ, f32 farZ) {
             for i32 sx = 0; sx < 2; sx++ {
                 f32 fx = sx == 0 ? 0.0f - hx : hx;
                 f32 fy = sy == 0 ? 0.0f - hy : hy;
-                // Eye-relative, like everything else the GPU sees: the eye
-                // is the draw origin, so it contributes nothing here.
                 cx[n] = vdir.x * z + cam_right.x * fx + cam_up.x * fy;
                 cy[n] = vdir.y * z + cam_right.y * fx + cam_up.y * fy;
                 cz[n] = vdir.z * z + cam_right.z * fx + cam_up.z * fy;
@@ -854,68 +1227,143 @@ void fit_cascade(i32 index, f32 nearZ, f32 farZ) {
         if d > radius { radius = d; }
     }
     if radius < 0.5f { radius = 0.5f; }
+    *centreOut = centre;
+    *radiusOut = radius;
+}
+
+// Fit one cascade to the view slice between near and far.
+//
+// Texel snapping: the sphere centre is quantized onto a world-anchored
+// lattice aligned with the light's own axes, one texel of world per
+// step, and the light matrices are built around the snapped centre.
+// Camera motion then slides the cascade in whole texels, so shadow
+// edges step instead of crawling. It has to happen on the centre and
+// not by projecting it through the finished matrix: the centre is the
+// look-at target, so it lands on clip (0, 0) by construction.
+void fit_cascade(i32 index, f32 nearZ, f32 farZ) {
+    float3 sun = float3{SUN_X, SUN_Y, SUN_Z};
+    float3 centre;
+    f32 radius;
+    slice_bounding_sphere(nearZ, farZ, &centre, &radius);
+
+    float3 up = float3{0.0f, 1.0f, 0.0f};
+    if sun.y > 0.99f { up = float3{0.0f, 0.0f, 1.0f}; }
+
+    // Light axes, matching the basis look_at derives below. The eye
+    // sits along +sun from the target, so the light looks along -sun.
+    // These depend only on the sun and the up choice, never on the
+    // camera, which is what makes the lattice hold still.
+    float3 fwd = float3{0.0f - sun.x, 0.0f - sun.y, 0.0f - sun.z};
+    float3 lr = float3{fwd.y * up.z - fwd.z * up.y,
+                       fwd.z * up.x - fwd.x * up.z,
+                       fwd.x * up.y - fwd.y * up.x};
+    f32 lrl = sqrtf(lr.x * lr.x + lr.y * lr.y + lr.z * lr.z);
+    lr = float3{lr.x / lrl, lr.y / lrl, lr.z / lrl};
+    float3 lu = float3{lr.y * fwd.z - lr.z * fwd.y,
+                       lr.z * fwd.x - lr.x * fwd.z,
+                       lr.x * fwd.y - lr.y * fwd.x};
+
+    // Radius is fixed for a given split, field of view and aspect, so
+    // the lattice step is fixed too and the same world points keep
+    // landing on the same texels frame to frame.
+    f32 texelWorld = 2.0f * radius / cast(f32, SHADOW_DIM);
+
+    // Geometry reaches the GPU shifted against the draw origin, which
+    // tracks the camera, so the frame slides whenever the camera does.
+    // Anchoring the lattice there would quantize against a moving
+    // reference, which is the crawl the snap exists to remove. Fold the
+    // eye back in and snap the absolute coordinate, in double so the
+    // fraction within a texel survives far from the origin.
+    f64 ox = cast(f64, lr.x) * cast(f64, cam_eye.x) + cast(f64, lr.y) * cast(f64, cam_eye.y)
+        + cast(f64, lr.z) * cast(f64, cam_eye.z);
+    f64 oy = cast(f64, lu.x) * cast(f64, cam_eye.x) + cast(f64, lu.y) * cast(f64, cam_eye.y)
+        + cast(f64, lu.z) * cast(f64, cam_eye.z);
+    f64 step = cast(f64, texelWorld);
+    f64 ax = ox + cast(f64, lr.x * centre.x + lr.y * centre.y + lr.z * centre.z);
+    f64 ay = oy + cast(f64, lu.x * centre.x + lu.y * centre.y + lu.z * centre.z);
+    f32 sx = cast(f32, round(ax / step) * step - ax);
+    f32 sy = cast(f32, round(ay / step) * step - ay);
+    centre = float3{centre.x + sx * lr.x + sy * lu.x,
+                    centre.y + sx * lr.y + sy * lu.y,
+                    centre.z + sx * lr.z + sy * lu.z};
 
     // The light eye sits CASTER_MARGIN in front of the sphere, and the
-    // depth range ends at its back face: casters up to CASTER_MARGIN above
-    // the slice reach the map, and no depth range is spent behind it.
+    // depth range ends at its back face: casters up to CASTER_MARGIN
+    // above the slice reach the map, and no depth range is spent
+    // behind it.
     f32 back = radius + CASTER_MARGIN;
     float3 eye = float3{centre.x + sun.x * back,
                         centre.y + sun.y * back,
                         centre.z + sun.z * back};
-    float3 up = float3{0.0f, 1.0f, 0.0f};
-    if sun.y > 0.99f { up = float3{0.0f, 0.0f, 1.0f}; }
     float4x4 view = look_at(eye, centre, up);
-    float4x4 proj = ortho_proj(radius, radius, 0.0f, 2.0f * radius + CASTER_MARGIN);
-
-    // Texel snapping: project the world origin, round to the nearest
-    // texel, translate the projection by the remainder. Without it the
-    // grid slides under the geometry and edges crawl.
-    float4x4 snap = mul(proj, view);
-    float4 origin = mul(snap, float4{0.0f, 0.0f, 0.0f, 1.0f});
-    f32 halfDim = 0.5f * cast(f32, SHADOW_DIM);
-    f32 tx = origin.x * halfDim;
-    f32 ty = origin.y * halfDim;
-    f32* pe = cast(f32*, &proj);
-    pe[12] += (roundf(tx) - tx) / halfDim;
-    pe[13] += (roundf(ty) - ty) / halfDim;
+    f32 depthRange = 2.0f * radius + CASTER_MARGIN;
+    float4x4 proj = ortho_proj(radius, radius, 0.0f, depthRange);
 
     // the depth pass rasterizes in clip space; the lookup uses texture
     // space
     g_light_clip[index] = mul(proj, view);
     g_light_mat[index] = mul(clip_to_texture(), g_light_clip[index]);
+    g_cascade_far[index] = farZ;
+    g_cascade_texel[index] = texelWorld;
+    // Texture depth spans the whole orthographic range, and the caster
+    // margin inflates that range without covering any more receiver.
+    // Sizing the bias in world units here decouples it, so the margin
+    // costs caster headroom and nothing else.
+    g_cascade_bias[index] = (DEPTH_BIAS_TEXELS * texelWorld) / depthRange;
 }
 
 // Split the shadowed range into cascades and fit each.
 void update_light_matrix() {
-    f32 far = g_shadow_split_far;
-    f32 near = SHADOW_SPLIT_NEAR;
-    f32 lambda = split_lambda_for_range(near, far);
-    f32 prev = near;
     for i32 i = 0; i < SHADOW_CASCADES; i++ {
-        f32 t = cast(f32, i + 1) / cast(f32, SHADOW_CASCADES);
-        f32 even = near + (far - near) * t;
-        f32 logarithmic = near * powf(far / near, t);
-        f32 split = lambda * logarithmic + (1.0f - lambda) * even;
-        fit_cascade(i, prev, split);
-        g_cascade_far[i] = split;
-        prev = split;
+        fit_cascade(i, split_distance(i), split_distance(i + 1));
     }
+}
+
+// Eye-relative box enclosing every shape that can cast into the
+// cascades: each slice's bounding sphere swept toward the sun by the
+// caster margin. It reaches well outside the camera frustum, which is
+// the point. A draw set culled to the visible volume drops casters
+// that belong in the shadow map, and their shadows vanish. Derived
+// from the camera alone, so it can be queried before the fit runs.
+void shadow_caster_bounds(float3* loOut, float3* hiOut) {
+    float3 lo = float3{FLT_MAX, FLT_MAX, FLT_MAX};
+    float3 hi = float3{0.0f - FLT_MAX, 0.0f - FLT_MAX, 0.0f - FLT_MAX};
+    for i32 i = 0; i < SHADOW_CASCADES; i++ {
+        float3 centre;
+        f32 radius;
+        slice_bounding_sphere(split_distance(i), split_distance(i + 1), &centre, &radius);
+        // A caster can only darken a receiver in this sphere if it sits
+        // between the two, so sweep the sphere toward the sun rather
+        // than growing it in every direction. Sweeping by the caster
+        // margin lands the front face exactly on the cascade's near
+        // plane.
+        float3 swept = float3{centre.x + CASTER_MARGIN * SUN_X,
+                              centre.y + CASTER_MARGIN * SUN_Y,
+                              centre.z + CASTER_MARGIN * SUN_Z};
+        lo.x = b3MinFloat(lo.x, b3MinFloat(centre.x, swept.x) - radius);
+        lo.y = b3MinFloat(lo.y, b3MinFloat(centre.y, swept.y) - radius);
+        lo.z = b3MinFloat(lo.z, b3MinFloat(centre.z, swept.z) - radius);
+        hi.x = b3MaxFloat(hi.x, b3MaxFloat(centre.x, swept.x) + radius);
+        hi.y = b3MaxFloat(hi.y, b3MaxFloat(centre.y, swept.y) + radius);
+        hi.z = b3MaxFloat(hi.z, b3MaxFloat(centre.z, swept.z) + radius);
+    }
+    *loOut = lo;
+    *hiOut = hi;
 }
 
 // --- rendering ------------------------------------------------------
 
 sg_pipeline g_pip_sky;
 sg_buffer g_sky_vbuf;
-sg_buffer g_sph_vbuf;
-sg_buffer g_cap_vbuf;
+sg_buffer g_proxy_vbuf;
 
-// Solids. Meshes and spheres share a pipeline; capsules size themselves
-// in the shader and need their own.
+// Solids. Meshes draw their vertices; spheres and capsules draw the
+// proxy cube through the impostor pipelines.
 sg_pipeline g_pip_inst;
 sg_pipeline g_pip_inst_mirror;
-sg_pipeline g_pip_inst_cap;
+sg_pipeline g_pip_imp;
 sg_pipeline g_pip_inst_depth;
-sg_pipeline g_pip_inst_depth_cap;
+sg_pipeline g_pip_imp_depth;
 
 // Column-major model matrix: translate * rotate(q) * scale(s), with an
 // optional body-local offset (rotated by q) for baked-transform hulls.

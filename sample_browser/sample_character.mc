@@ -281,54 +281,182 @@ void step_mover_overlap(f32 timeStep) {
     dbg_ground_grid(12);
 }
 
-// samples/sample_character.cpp BasicMover. The controller itself is
+// samples/sample_character.cpp GeometricMover. The controller itself is
 // upstream's samples/mover.cpp, transpiled to lib/box3d_mover.mc and
 // bound to the browser by mover_shim.mc.
-CharacterMover g_bm_mover;
-MoverShapeUserData g_bm_enemy_shape;
-MoverShapeUserData g_bm_friendly_shape;
-b3MeshData* g_bm_level_mesh;
-b3MeshData* g_bm_stairs;
-b3MeshData* g_bm_torus;
-b3HeightFieldData* g_bm_height_field;
-b3ShapeId g_bm_ignore_shape_id;
-bool g_bm_clip_velocity;
+CharacterMover g_gm_mover;
+MoverShapeUserData g_gm_enemy_shape;
+MoverShapeUserData g_gm_friendly_shape;
+b3MeshData* g_gm_level_mesh;
+b3MeshData* g_gm_stairs;
+b3MeshData* g_gm_torus;
+b3HeightFieldData* g_gm_height_field;
+b3ShapeId g_gm_ignore_shape_id;
+bool g_gm_clip_velocity;
 
-// upstream `{ 0.6f, 0.0f, 0 }` etc: friction, restitution,
-// rollingResistance.
-void bm_fill_materials(b3SurfaceMaterial* materials) {
-    materials[0] = b3SurfaceMaterial{};
-    materials[0].friction = 0.6f;
-    materials[0].restitution = 0.0f;
-    materials[0].rollingResistance = 0.0f;
-    materials[1] = b3SurfaceMaterial{};
-    materials[1].friction = 0.6f;
-    materials[1].restitution = 1.0f;
-    materials[1].rollingResistance = 1.0f;
-    materials[2] = b3SurfaceMaterial{};
-    materials[2].friction = 0.1f;
-    materials[2].restitution = 0.0f;
-    materials[2].rollingResistance = 2.0f;
+// What the mover was last struck with. Stays on screen until the next
+// hit.
+struct MoverImpact {
+    b3Pos point;
+    b3Vec3 normal;
+    f32 speed;
+    bool valid;
 }
 
-void build_basic_mover() {
+MoverShapeUserData g_gm_tree_shape;
+b3BodyId g_gm_falling_box;
+b3BodyId g_gm_tree;
+b3WorldTransform g_gm_impact_transform;
+MoverImpact g_gm_box_impact;
+MoverImpact g_gm_tree_impact;
+b3Pos g_gm_tree_spawn;
+b3Vec3 g_gm_tree_spin;
+f32 g_gm_tree_timer;
+b3Pos g_gm_falling_spawn;
+b3Vec3 g_gm_falling_extent;
+b3Vec3 g_gm_falling_spin;
+f32 g_gm_respawn_timer;
+// Poses at the start of the frame, for the time-of-impact sweeps that
+// run after the step.
+b3Pos g_gm_mover_start;
+b3WorldTransform g_gm_box_start;
+b3WorldTransform g_gm_tree_start;
+
+// One tree from the falling trees benchmark: a stack of shrinking
+// cylinders sharing a body.
+void gm_create_falling_tree() {
+    b3BodyDef bodyDef = b3DefaultBodyDef();
+    bodyDef.type = b3_dynamicBody;
+    bodyDef.position = g_gm_tree_spawn;
+    bodyDef.sleepThreshold = 0.2f;
+    g_gm_tree = b3CreateBody(g_world, &bodyDef);
+
+    b3ShapeDef shapeDef = b3DefaultShapeDef();
+    shapeDef.baseMaterial.friction = 0.9f;
+    shapeDef.baseMaterial.rollingResistance = 0.05f;
+    shapeDef.updateBodyMass = false;
+    shapeDef.userData = cast(void*, &g_gm_tree_shape);
+
+    f32 y = 1.0f;
+    f32 r = 0.75f;
+    f32 l = 1.5f;
+    for i32 i = 0; i < 22; ++i {
+        b3HullData* hull = b3CreateCylinder(l + 2.0f * r, r, y - r, 6);
+        ignore b3CreateHullShape(g_gm_tree, &shapeDef, hull);
+        b3DestroyHull(hull);
+
+        y += l + 2.0f * r;
+        r = 0.95f * r;
+    }
+
+    b3Body_ApplyMassFromShapes(g_gm_tree);
+
+    b3Pos center = b3Body_GetWorldCenter(g_gm_tree);
+    b3Body_SetAngularVelocity(g_gm_tree, g_gm_tree_spin);
+    b3Body_SetLinearVelocity(g_gm_tree, b3Cross(g_gm_tree_spin, b3SubPos(center, g_gm_tree_spawn)));
+}
+
+// Spin about the base so the trunk sweeps down through anything standing
+// in the fall line.
+void gm_reset_falling_tree() {
+    b3DestroyBody(g_gm_tree);
+    gm_create_falling_tree();
+}
+
+// The normal points from the body to the mover, so approach gives a
+// positive speed.
+MoverImpact gm_make_impact(b3BodyId bodyId, b3BodyTOIResult* toi) {
+    b3Vec3 pointVelocity = b3Body_GetWorldPointVelocity(bodyId, toi.point);
+    f32 speed = b3Dot(toi.normal, b3Sub(pointVelocity, g_gm_mover.m_velocity));
+    return MoverImpact{toi.point, toi.normal, speed, true};
+}
+
+void gm_draw_impact(MoverImpact* impact, b3HexColor color) {
+    if !impact.valid { return; }
+    b3Pos tip = b3OffsetPos(impact.point, b3MulSV(0.5f, impact.normal));
+    adapter_point(impact.point, 6.0f, color, null);
+    dbg_arrow(impact.point, tip, color);
+    u8[32] buf;
+    ignore snprintf(cast(u8*, &buf), 32, " %.1f m/s", cast(f64, impact.speed));
+    dbg_string_3d(tip, make_color(color), cast(u8*, &buf));
+}
+
+// True once the body has held still for a second.
+bool gm_settled_for_one_second(b3BodyId bodyId, f32* timer) {
+    if b3Body_IsAwake(bodyId) {
+        *timer = 0.0f;
+        return false;
+    }
+    *timer += g_hertz > 0.0f ? 1.0f / g_hertz : 0.0f;
+    if *timer < 1.0f { return false; }
+    *timer = 0.0f;
+    return true;
+}
+
+void gm_respawn_falling_box() {
+    b3Body_SetTransform(g_gm_falling_box, g_gm_falling_spawn, b3Quat_identity);
+    b3Body_SetLinearVelocity(g_gm_falling_box, b3Vec3_zero);
+    b3Body_SetAngularVelocity(g_gm_falling_box, g_gm_falling_spin);
+    b3Body_SetAwake(g_gm_falling_box, true);
+}
+
+// Same sweep as the box, but the tree reports what the character was
+// struck with.
+void gm_update_falling_tree() {
+    b3WorldTransform treeEnd = b3Body_GetTransform(g_gm_tree);
+    b3Vec3 moverTranslation = b3SubPos(g_gm_mover.m_transform.p, g_gm_mover_start);
+
+    b3BodyTOIResult toi = b3Body_TimeOfImpactMover(g_gm_tree, g_gm_mover_start, &g_gm_mover.m_capsule,
+        moverTranslation, b3DefaultQueryFilter(), g_gm_tree_start, treeEnd);
+    if toi.fraction > 0.0f {
+        g_gm_tree_impact = gm_make_impact(g_gm_tree, &toi);
+    }
+
+    if gm_settled_for_one_second(g_gm_tree, &g_gm_tree_timer) {
+        gm_reset_falling_tree();
+    }
+}
+
+// Sweep the mover capsule against the box motion from this step and keep
+// the box pose at first touch. Both sweeps cover the same interval, so
+// the mover translation comes from this step too.
+void gm_update_falling_box() {
+    b3WorldTransform boxEnd = b3Body_GetTransform(g_gm_falling_box);
+    b3Vec3 moverTranslation = b3SubPos(g_gm_mover.m_transform.p, g_gm_mover_start);
+
+    b3BodyTOIResult toi = b3Body_TimeOfImpactMover(g_gm_falling_box, g_gm_mover_start, &g_gm_mover.m_capsule,
+        moverTranslation, b3DefaultQueryFilter(), g_gm_box_start, boxEnd);
+
+    // A zero fraction means the box was already resting against the
+    // mover, so keep the pose from the step that first reached it.
+    if toi.fraction > 0.0f {
+        g_gm_impact_transform.p = b3OffsetPos(g_gm_box_start.p,
+            b3MulSV(toi.fraction, b3SubPos(boxEnd.p, g_gm_box_start.p)));
+        g_gm_impact_transform.q = b3NLerp(g_gm_box_start.q, boxEnd.q, toi.fraction);
+        g_gm_box_impact = gm_make_impact(g_gm_falling_box, &toi);
+    }
+
+    if gm_settled_for_one_second(g_gm_falling_box, &g_gm_respawn_timer) {
+        gm_respawn_falling_box();
+    }
+}
+
+void build_geometric_mover() {
     b3Pos moverPosition = b3Pos{7.5f, 0.75f, 9.0f};
 
-    CharacterMover_Initialize(&g_bm_mover, mover_sample(), moverPosition);
+    CharacterMover_Initialize(&g_gm_mover, mover_sample(), moverPosition);
 
     {
-        g_bm_level_mesh = create_mesh_data("data/meshes/test_map01.obj", 1.0f,
+        g_gm_level_mesh = create_mesh_data("data/meshes/test_map01.obj", 1.0f,
                                            false, false, true, true);
         b3BodyDef bodyDef = b3DefaultBodyDef();
         b3BodyId body = b3CreateBody(g_world, &bodyDef);
 
         b3ShapeDef shapeDef = b3DefaultShapeDef();
-        b3SurfaceMaterial[3] materials;
-        bm_fill_materials(cast(b3SurfaceMaterial*, &materials));
-        shapeDef.materials = cast(b3SurfaceMaterial*, &materials);
-        shapeDef.materialCount = 3;
 
-        ignore b3CreateMeshShape(body, &shapeDef, g_bm_level_mesh, b3Vec3_one);
+        if g_gm_level_mesh != null {
+            ignore b3CreateMeshShape(body, &shapeDef, g_gm_level_mesh, b3Vec3_one);
+        }
 
         {
             b3Transform transform = b3Transform{b3Vec3{4.0f, 1.0f, 14.0f}, b3Quat_identity};
@@ -349,7 +477,7 @@ void build_basic_mover() {
     }
 
     {
-        g_bm_stairs = create_mesh_data("data/meshes/stairs.obj", 1.0f,
+        g_gm_stairs = create_mesh_data("data/meshes/stairs.obj", 1.0f,
                                         false, false, true, true);
 
         b3BodyDef bodyDef = b3DefaultBodyDef();
@@ -357,11 +485,13 @@ void build_basic_mover() {
 
         b3ShapeDef shapeDef = b3DefaultShapeDef();
         b3BodyId body = b3CreateBody(g_world, &bodyDef);
-        ignore b3CreateMeshShape(body, &shapeDef, g_bm_stairs, b3Vec3{0.75f, 0.75f, -1.5f});
+        if g_gm_stairs != null {
+            ignore b3CreateMeshShape(body, &shapeDef, g_gm_stairs, b3Vec3{0.75f, 0.75f, -1.5f});
+        }
     }
 
     {
-        g_bm_torus = b3CreateTorusMesh(10, 12, 2.0f, 1.0f);
+        g_gm_torus = b3CreateTorusMesh(10, 12, 2.0f, 1.0f);
 
         b3BodyDef bodyDef = b3DefaultBodyDef();
         bodyDef.position = b3Pos{-10.0f, 1.0f, -8.0f};
@@ -369,7 +499,7 @@ void build_basic_mover() {
 
         b3ShapeDef shapeDef = b3DefaultShapeDef();
         b3BodyId body = b3CreateBody(g_world, &bodyDef);
-        ignore b3CreateMeshShape(body, &shapeDef, g_bm_torus, b3Vec3{-0.75f, 1.5f, 0.5f});
+        ignore b3CreateMeshShape(body, &shapeDef, g_gm_torus, b3Vec3{-0.75f, 1.5f, 0.5f});
     }
 
     {
@@ -377,14 +507,23 @@ void build_basic_mover() {
         bodyDef.position = b3Pos{20.0f, 0.0f, 0.0f};
         b3BodyId body = b3CreateBody(g_world, &bodyDef);
 
-        g_bm_height_field = b3CreateWave(50, 50, b3Vec3_one, 0.02f, 0.04f, true);
+        g_gm_height_field = b3CreateWave(50, 50, b3Vec3_one, 0.02f, 0.04f, true);
         b3ShapeDef shapeDef = b3DefaultShapeDef();
-        b3SurfaceMaterial[3] materials;
-        bm_fill_materials(cast(b3SurfaceMaterial*, &materials));
-        shapeDef.materials = cast(b3SurfaceMaterial*, &materials);
-        shapeDef.materialCount = 3;
+        ignore b3CreateHeightFieldShape(body, &shapeDef, g_gm_height_field);
+    }
 
-        ignore b3CreateHeightFieldShape(body, &shapeDef, g_bm_height_field);
+    // The tree is longer than the height field is wide, so topple it
+    // along the diagonal.
+    {
+        b3Vec3 axis = b3Vec3{1.0f, 0.0f, -1.0f};
+        g_gm_tree_spin = b3MulSV(0.5f, b3Normalize(axis));
+        g_gm_tree_spawn = b3Pos{22.0f, 1.5f, 2.0f};
+        g_gm_tree_timer = 0.0f;
+        g_gm_tree_shape.maxPush = 10.0f;
+        g_gm_tree_shape.clipVelocity = true;
+        g_gm_tree_shape.canMoverPush = false;
+        g_gm_tree_impact = MoverImpact{};
+        gm_create_falling_tree();
     }
 
     {
@@ -392,8 +531,9 @@ void build_basic_mover() {
         bodyDef.position = b3Pos{0.0f, 1.4f, 6.0f};
 
         b3ShapeDef shapeDef = b3DefaultShapeDef();
-        g_bm_enemy_shape.maxPush = 1.0f;
-        g_bm_enemy_shape.clipVelocity = true;
+        g_gm_enemy_shape.maxPush = 1.0f;
+        g_gm_enemy_shape.clipVelocity = true;
+        g_gm_enemy_shape.canMoverPush = false;
 
         b3Capsule capsule = b3Capsule{
             b3Pos{0.0f, -0.5f, 0.0f},
@@ -401,7 +541,7 @@ void build_basic_mover() {
             0.3f,
         };
 
-        shapeDef.userData = cast(void*, &g_bm_enemy_shape);
+        shapeDef.userData = cast(void*, &g_gm_enemy_shape);
         shapeDef.baseMaterial.customColor = cast(u32, b3_colorMediumVioletRed);
         b3BodyId body = b3CreateBody(g_world, &bodyDef);
         ignore b3CreateCapsuleShape(body, &shapeDef, &capsule);
@@ -412,8 +552,9 @@ void build_basic_mover() {
         bodyDef.position = b3Pos{0.0f, 1.4f, 5.0f};
 
         b3ShapeDef shapeDef = b3DefaultShapeDef();
-        g_bm_friendly_shape.maxPush = 0.01f;
-        g_bm_friendly_shape.clipVelocity = false;
+        g_gm_friendly_shape.maxPush = 0.01f;
+        g_gm_friendly_shape.clipVelocity = false;
+        g_gm_friendly_shape.canMoverPush = false;
 
         b3Capsule capsule = b3Capsule{
             b3Pos{0.0f, -0.5f, 0.0f},
@@ -425,7 +566,7 @@ void build_basic_mover() {
         shapeDef.filter.categoryBits = cast(u64, 2);
         shapeDef.filter.maskBits = ~cast(u64, 0);
         shapeDef.filter.groupIndex = 0;
-        shapeDef.userData = cast(void*, &g_bm_friendly_shape);
+        shapeDef.userData = cast(void*, &g_gm_friendly_shape);
         shapeDef.baseMaterial.customColor = cast(u32, b3_colorLimeGreen);
         b3BodyId body = b3CreateBody(g_world, &bodyDef);
         ignore b3CreateCapsuleShape(body, &shapeDef, &capsule);
@@ -442,6 +583,30 @@ void build_basic_mover() {
         ignore b3CreateSphereShape(body, &shapeDef, &sphere);
     }
 
+    // Falls through the mover start position on a loop to feed the mover
+    // time of impact.
+    {
+        g_gm_falling_extent = b3Vec3{1.0f, 0.1f, 1.0f};
+        g_gm_falling_spawn = b3Pos{10.5f, 30.0f, 0.0f};
+        g_gm_falling_spin = b3Vec3{0.0f, 0.0f, 0.0f};
+
+        b3BodyDef bodyDef = b3DefaultBodyDef();
+        bodyDef.type = b3_dynamicBody;
+        bodyDef.position = g_gm_falling_spawn;
+        bodyDef.angularVelocity = g_gm_falling_spin;
+        g_gm_falling_box = b3CreateBody(g_world, &bodyDef);
+
+        b3ShapeDef shapeDef = b3DefaultShapeDef();
+        shapeDef.baseMaterial.customColor = cast(u32, b3_colorGold);
+        b3BoxHull box = b3MakeBoxHull(g_gm_falling_extent.x, g_gm_falling_extent.y, g_gm_falling_extent.z);
+        ignore b3CreateHullShape(g_gm_falling_box, &shapeDef, &box.base);
+
+        g_gm_respawn_timer = 0.0f;
+        g_gm_impact_transform.p = b3Pos_zero;
+        g_gm_impact_transform.q = b3Quat_identity;
+        g_gm_box_impact = MoverImpact{};
+    }
+
     {
         b3BodyDef bodyDef = b3DefaultBodyDef();
         bodyDef.position = b3Pos{7.0f, 2.0f, -3.0f};
@@ -450,7 +615,7 @@ void build_basic_mover() {
         b3ShapeDef shapeDef = b3DefaultShapeDef();
         shapeDef.baseMaterial.customColor = cast(u32, b3_colorFloralWhite);
         b3BoxHull box = b3MakeBoxHull(0.5f, 0.25f, 0.5f);
-        g_bm_ignore_shape_id = b3CreateHullShape(body, &shapeDef, &box.base);
+        g_gm_ignore_shape_id = b3CreateHullShape(body, &shapeDef, &box.base);
     }
 
     {
@@ -493,40 +658,44 @@ void build_basic_mover() {
     }
 
     cam_third_person = false;
-    g_bm_clip_velocity = true;
+    g_gm_clip_velocity = true;
 }
 
-void destroy_basic_mover() {
+void destroy_geometric_mover() {
     cam_third_person = false;
     sapp_lock_mouse(false);
-    b3DestroyMesh(g_bm_level_mesh);
-    b3DestroyMesh(g_bm_stairs);
-    b3DestroyMesh(g_bm_torus);
-    b3DestroyHeightField(g_bm_height_field);
+    if g_gm_level_mesh != null { b3DestroyMesh(g_gm_level_mesh); }
+    if g_gm_stairs != null { b3DestroyMesh(g_gm_stairs); }
+    b3DestroyMesh(g_gm_torus);
+    b3DestroyHeightField(g_gm_height_field);
 }
 
-bool basic_mover_controls() {
+bool geometric_mover_controls() {
     bool thirdPerson = cam_third_person;
     if ImGui_Checkbox("Third Person (T)", &thirdPerson) {
         toggle_third_person();
     }
 
-    ignore ImGui_Checkbox("Clip Velocity", &g_bm_clip_velocity);
+    ignore ImGui_Checkbox("Clip Velocity", &g_gm_clip_velocity);
 
     return true;
 }
 
-void basic_mover_keyboard(i32 key, i32 action, i32 mods) {
+void geometric_mover_keyboard(i32 key, i32 action, i32 mods) {
     ignore mods;
     if key == SAPP_KEYCODE_T && action == 1 {
         toggle_third_person();
     }
 }
 
-void step_basic_mover(f32 timeStep) {
+void step_geometric_mover(f32 timeStep) {
     ignore timeStep;
     mover_sync();
-    CharacterMover_Step(&g_bm_mover, &g_bm_ignore_shape_id, 1, g_bm_clip_velocity);
+    g_gm_mover_start = g_gm_mover.m_transform.p;
+    g_gm_box_start = b3Body_GetTransform(g_gm_falling_box);
+    g_gm_tree_start = b3Body_GetTransform(g_gm_tree);
+
+    CharacterMover_Step(&g_gm_mover, &g_gm_ignore_shape_id, 1, g_gm_clip_velocity);
 
     b3WorldTransform axes;
     axes.p = b3Pos{0.0f, 0.0f, 0.02f};
@@ -539,10 +708,44 @@ void step_basic_mover(f32 timeStep) {
     draw_text_line(cast(u8*, &buf));
 }
 
+// After the world step: the time-of-impact sweeps over the motion the
+// step just produced, then the impact overlay.
+void step_geometric_mover_post(f32 timeStep) {
+    if timeStep > 0.0f {
+        gm_update_falling_box();
+        gm_update_falling_tree();
+    }
+
+    if g_gm_box_impact.valid {
+        b3BoxHull box = b3MakeBoxHull(g_gm_falling_extent.x, g_gm_falling_extent.y, g_gm_falling_extent.z);
+        dbg_hull(g_gm_impact_transform, &box.base, b3_colorYellow);
+    }
+
+    gm_draw_impact(&g_gm_box_impact, b3_colorYellow);
+    gm_draw_impact(&g_gm_tree_impact, b3_colorCyan);
+}
+
 // samples/sample_character.cpp RigidBodyCharacter. The controller is
 // upstream's RigidbodyCharacter, moved to its own translation unit
 // (ext/box3d/samples/rigidbody_character.cpp), transpiled to
 // lib/box3d_rbchar.mc and bound to the browser by mover_shim.mc.
+// upstream `{ 0.6f, 0.0f, 0 }` etc: friction, restitution,
+// rollingResistance, on the level mesh and height field.
+void rbc_fill_materials(b3SurfaceMaterial* materials) {
+    materials[0] = b3SurfaceMaterial{};
+    materials[0].friction = 0.6f;
+    materials[0].restitution = 0.0f;
+    materials[0].rollingResistance = 0.0f;
+    materials[1] = b3SurfaceMaterial{};
+    materials[1].friction = 0.6f;
+    materials[1].restitution = 1.0f;
+    materials[1].rollingResistance = 1.0f;
+    materials[2] = b3SurfaceMaterial{};
+    materials[2].friction = 0.1f;
+    materials[2].restitution = 0.0f;
+    materials[2].rollingResistance = 2.0f;
+}
+
 RigidbodyCharacter g_rbc_character;
 b3MeshData* g_rbc_level_mesh;
 b3MeshData* g_rbc_stairs;
@@ -565,7 +768,7 @@ void build_rigid_body_character() {
 
         b3ShapeDef shapeDef = b3DefaultShapeDef();
         b3SurfaceMaterial[3] materials;
-        bm_fill_materials(cast(b3SurfaceMaterial*, &materials));
+        rbc_fill_materials(cast(b3SurfaceMaterial*, &materials));
         shapeDef.materials = cast(b3SurfaceMaterial*, &materials);
         shapeDef.materialCount = 3;
 
@@ -627,7 +830,7 @@ void build_rigid_body_character() {
         g_rbc_height_field = b3CreateWave(50, 50, b3Vec3_one, 0.02f, 0.04f, true);
         b3ShapeDef shapeDef = b3DefaultShapeDef();
         b3SurfaceMaterial[3] materials;
-        bm_fill_materials(cast(b3SurfaceMaterial*, &materials));
+        rbc_fill_materials(cast(b3SurfaceMaterial*, &materials));
         shapeDef.materials = cast(b3SurfaceMaterial*, &materials);
         shapeDef.materialCount = 3;
 
@@ -776,8 +979,7 @@ void late_step_rigid_body_character(f32 timeStep) {
     b3Pos charPos = b3Body_GetPosition(g_rbc_character.m_bodyId);
     b3Pos pos = charPos;
     if cam_third_person {
-        cam_pivot = float3{charPos.x, charPos.y, charPos.z};
-        cam_rebuild_basis();
+        cam_set_target(charPos);
 
         // Keep the eye from clipping through geometry. Cast from the
         // character toward the eye and, on a hit, shorten the boom for

@@ -653,3 +653,285 @@ void step_hit_event(f32 timeStep) {
     ignore snprintf(cast(u8*, &buf), 128, "event count = %d", g_he_event_count);
     draw_text_line(cast(u8*, &buf));
 }
+
+// samples/sample_events.cpp ContactEvent: contact events transfer shapes
+// from one body to another. A rolling player picks up the debris it
+// touches and sheds accreted shapes that scrape the walls.
+const i32 CE_COUNT = 200;
+
+struct CeBodyUserData {
+    i32 index;
+}
+
+b3BodyId g_ce_player;
+b3BodyId g_ce_walls;
+b3ShapeId g_ce_core_shape;
+b3BodyId[CE_COUNT] g_ce_debris;
+CeBodyUserData[CE_COUNT] g_ce_user_data;
+f32 g_ce_ground_extent;
+f32 g_ce_mass_extent;
+f32 g_ce_torque;
+f32 g_ce_wait;
+
+bool ce_body_equals(b3BodyId a, b3BodyId b) {
+    return a.index1 == b.index1 && a.world0 == b.world0 && a.generation == b.generation;
+}
+
+bool ce_shape_equals(b3ShapeId a, b3ShapeId b) {
+    return a.index1 == b.index1 && a.world0 == b.world0 && a.generation == b.generation;
+}
+
+void build_contact_event() {
+    g_ce_ground_extent = 80.0f;
+    ignore add_ground_box(g_ce_ground_extent);
+
+    // The walls live on their own body so a contact can be told apart
+    // from the floor: the player rides on the floor at all times, so
+    // treating every non-debris body as a wall would strip each pickup
+    // the moment it dragged along the ground.
+    {
+        b3BodyDef bodyDef = b3DefaultBodyDef();
+        bodyDef.name = "walls";
+        g_ce_walls = b3CreateBody(g_world, &bodyDef);
+
+        b3ShapeDef shapeDef = b3DefaultShapeDef();
+
+        f32 extent = g_ce_ground_extent + 0.5f;
+        f32 height = 5.0f;
+        f32 thickness = 0.5f;
+
+        b3BoxHull wall = b3MakeTransformedBoxHull(thickness, height, extent,
+            b3Transform{b3Vec3{extent, height, 0.0f}, b3Quat_identity});
+        ignore b3CreateHullShape(g_ce_walls, &shapeDef, &wall.base);
+
+        wall = b3MakeTransformedBoxHull(thickness, height, extent,
+            b3Transform{b3Vec3{-extent, height, 0.0f}, b3Quat_identity});
+        ignore b3CreateHullShape(g_ce_walls, &shapeDef, &wall.base);
+
+        wall = b3MakeTransformedBoxHull(extent, height, thickness,
+            b3Transform{b3Vec3{0.0f, height, extent}, b3Quat_identity});
+        ignore b3CreateHullShape(g_ce_walls, &shapeDef, &wall.base);
+
+        wall = b3MakeTransformedBoxHull(extent, height, thickness,
+            b3Transform{b3Vec3{0.0f, height, -extent}, b3Quat_identity});
+        ignore b3CreateHullShape(g_ce_walls, &shapeDef, &wall.base);
+    }
+
+    // Player
+    {
+        b3BodyDef bodyDef = b3DefaultBodyDef();
+        bodyDef.type = b3_dynamicBody;
+        bodyDef.name = "player";
+        bodyDef.position = b3Pos{0.0f, 1.0f, 0.0f};
+        bodyDef.angularDamping = 0.1f;
+        g_ce_player = b3CreateBody(g_world, &bodyDef);
+
+        b3ShapeDef shapeDef = b3DefaultShapeDef();
+
+        // Contact events fire when either shape enables them, so opting
+        // in the player alone still reports every collision it has while
+        // debris hitting debris stays silent.
+        shapeDef.enableContactEvents = true;
+
+        // Friction is what turns the drive torque into motion.
+        shapeDef.baseMaterial.friction = 0.6f;
+        shapeDef.baseMaterial.rollingResistance = 0.1f;
+        shapeDef.baseMaterial.customColor = b3MakeDebugColor(b3_colorPlum, b3_debugMaterialMetallic);
+
+        b3Sphere sphere = b3Sphere{b3Vec3_zero, 1.0f};
+        g_ce_core_shape = b3CreateSphereShape(g_ce_player, &shapeDef, &sphere);
+    }
+
+    for i32 i = 0; i < CE_COUNT; ++i {
+        g_ce_debris[i] = b3_nullBodyId;
+        g_ce_user_data[i].index = i;
+    }
+
+    b3AABB bounds = b3Body_ComputeAABB(g_ce_player);
+    b3Vec3 extents = b3AABB_Extents(bounds);
+    f32 mass = b3Body_GetMass(g_ce_player);
+    g_ce_mass_extent = (mass / 3.0f) * (extents.x + extents.y + extents.z);
+    g_ce_torque = 30000.0f;
+    g_ce_wait = 0.5f;
+}
+
+void ce_spawn_debris() {
+    i32 index = -1;
+    for i32 i = 0; i < CE_COUNT; ++i {
+        if g_ce_debris[i].index1 == 0 {
+            index = i;
+            break;
+        }
+    }
+    if index == -1 { return; }
+
+    f32 a = g_ce_ground_extent - 2.0f;
+    b3BodyDef bodyDef = b3DefaultBodyDef();
+    bodyDef.type = b3_dynamicBody;
+    bodyDef.position = random_pos(b3Vec3{-a, 1.0f, -a}, b3Vec3{a, 6.0f, a});
+    bodyDef.rotation = random_quat();
+    bodyDef.linearVelocity = random_vec3_uniform(-2.0f, 2.0f);
+    bodyDef.angularVelocity = random_vec3_uniform(-1.0f, 1.0f);
+    bodyDef.userData = cast(void*, &g_ce_user_data[index]);
+    g_ce_debris[index] = b3CreateBody(g_world, &bodyDef);
+
+    b3ShapeDef shapeDef = b3DefaultShapeDef();
+    shapeDef.baseMaterial.restitution = 0.3f;
+
+    if (index + 1) % 3 == 0 {
+        b3Sphere sphere = b3Sphere{b3Vec3_zero, 0.5f};
+        ignore b3CreateSphereShape(g_ce_debris[index], &shapeDef, &sphere);
+    } else if (index + 1) % 2 == 0 {
+        b3Capsule capsule = b3Capsule{b3Vec3{0.0f, -0.25f, 0.0f}, b3Vec3{0.0f, 0.25f, 0.0f}, 0.25f};
+        ignore b3CreateCapsuleShape(g_ce_debris[index], &shapeDef, &capsule);
+    } else {
+        b3BoxHull box = b3MakeBoxHull(0.4f, 0.6f, 0.5f);
+        ignore b3CreateHullShape(g_ce_debris[index], &shapeDef, &box.base);
+    }
+}
+
+// Rebuild a debris shape in the player frame and destroy the body it
+// came from.
+void ce_attach_debris(i32 index) {
+    b3BodyId debrisId = g_ce_debris[index];
+    if debrisId.index1 == 0 { return; }
+
+    b3WorldTransform playerTransform = b3Body_GetTransform(g_ce_player);
+    b3WorldTransform debrisTransform = b3Body_GetTransform(debrisId);
+    b3Transform relativeTransform = b3InvMulWorldTransforms(playerTransform, debrisTransform);
+
+    b3ShapeId shapeId;
+    if b3Body_GetShapes(debrisId, &shapeId, 1) == 0 { return; }
+
+    b3ShapeDef shapeDef = b3DefaultShapeDef();
+    shapeDef.enableContactEvents = true;
+    shapeDef.baseMaterial.customColor = cast(u32, b3_colorGold);
+    // Several shapes may land in one step, so the mass update happens
+    // once at the end.
+    shapeDef.updateBodyMass = false;
+
+    var type = b3Shape_GetType(shapeId);
+    if type == b3_sphereShape {
+        b3Sphere sphere = b3Shape_GetSphere(shapeId);
+        sphere.center = b3TransformPoint(relativeTransform, sphere.center);
+        ignore b3CreateSphereShape(g_ce_player, &shapeDef, &sphere);
+    } else if type == b3_capsuleShape {
+        b3Capsule capsule = b3Shape_GetCapsule(shapeId);
+        capsule.center1 = b3TransformPoint(relativeTransform, capsule.center1);
+        capsule.center2 = b3TransformPoint(relativeTransform, capsule.center2);
+        ignore b3CreateCapsuleShape(g_ce_player, &shapeDef, &capsule);
+    } else if type == b3_hullShape {
+        // The hull is cloned and baked, so the source body can go away
+        // right after.
+        b3HullData* hull = b3Shape_GetHull(shapeId);
+        ignore b3CreateTransformedHullShape(g_ce_player, &shapeDef, hull, relativeTransform, b3Vec3_one);
+    }
+
+    b3DestroyBody(debrisId);
+    g_ce_debris[index] = b3_nullBodyId;
+}
+
+bool contact_event_controls() {
+    ImGui_PushItemWidth(6.0f * ImGui_GetFontSize());
+    ignore ImGui_SliderFloat("torque", &g_ce_torque, 0.0f, 60000.0f, "%.0f", 0);
+    ImGui_PopItemWidth();
+    return true;
+}
+
+// Ahead of the world step: drive relative to the camera so the controls
+// hold up as the view orbits.
+void step_contact_event(f32 timeStep) {
+    ignore timeStep;
+    b3Vec2 throttle = b3Vec2{0.0f, 0.0f};
+    if is_key_down(SAPP_KEYCODE_W) { throttle.x += 1.0f; }
+    if is_key_down(SAPP_KEYCODE_S) { throttle.x -= 1.0f; }
+    if is_key_down(SAPP_KEYCODE_A) { throttle.y -= 1.0f; }
+    if is_key_down(SAPP_KEYCODE_D) { throttle.y += 1.0f; }
+
+    // cam_forward runs pivot to eye, as upstream's GetForward does.
+    b3Vec3 forward = b3Normalize(b3Vec3{-cam_forward.x, 0.0f, -cam_forward.z});
+    b3Vec3 right = b3Normalize(b3Vec3{cam_right.x, 0.0f, cam_right.z});
+
+    b3Vec3 direction = b3Add(b3MulSV(throttle.x, forward), b3MulSV(throttle.y, right));
+    if b3LengthSquared(direction) > 0.0f {
+        b3AABB bounds = b3Body_ComputeAABB(g_ce_player);
+        b3Vec3 extents = b3AABB_Extents(bounds);
+        f32 mass = b3Body_GetMass(g_ce_player);
+        f32 massExtent = (mass / 3.0f) * (extents.x + extents.y + extents.z);
+        f32 scale = massExtent / g_ce_mass_extent;
+
+        // Rolling without slipping spins about up cross velocity.
+        b3Vec3 axis = b3Cross(b3Vec3_axisY, b3Normalize(direction));
+        b3Body_ApplyTorque(g_ce_player, b3MulSV(scale * g_ce_torque, axis), true);
+    }
+}
+
+// After the world step: the contact events the step produced.
+void step_contact_event_post(f32 timeStep) {
+    ignore timeStep;
+    i32[CE_COUNT] debrisToAttach;
+    b3ShapeId[CE_COUNT] shapesToDestroy;
+    i32 attachCount = 0;
+    i32 destroyCount = 0;
+
+    b3ContactEvents contactEvents = b3World_GetContactEvents(g_world);
+    for i32 i = 0; i < contactEvents.beginCount; ++i {
+        var event = contactEvents.beginEvents[i];
+
+        b3ShapeId playerShapeId = event.shapeIdA;
+        b3ShapeId otherShapeId = event.shapeIdB;
+        if !ce_body_equals(b3Shape_GetBody(playerShapeId), g_ce_player) {
+            playerShapeId = event.shapeIdB;
+            otherShapeId = event.shapeIdA;
+        }
+
+        // Only the player enables contact events, so one side is always
+        // the player.
+        b3BodyId otherBodyId = b3Shape_GetBody(otherShapeId);
+        CeBodyUserData* userData = cast(CeBodyUserData*, b3Body_GetUserData(otherBodyId));
+
+        if userData != null {
+            if attachCount < CE_COUNT {
+                debrisToAttach[attachCount] = userData.index;
+                attachCount += 1;
+            }
+        } else if ce_body_equals(otherBodyId, g_ce_walls) && !ce_shape_equals(playerShapeId, g_ce_core_shape) {
+            // An accreted shape scraped a wall. The core is exempt or the
+            // player would dissolve.
+            bool found = false;
+            for i32 j = 0; j < destroyCount; ++j {
+                if ce_shape_equals(playerShapeId, shapesToDestroy[j]) {
+                    found = true;
+                    break;
+                }
+            }
+            if !found && destroyCount < CE_COUNT {
+                shapesToDestroy[destroyCount] = playerShapeId;
+                destroyCount += 1;
+            }
+        }
+    }
+
+    for i32 i = 0; i < attachCount; ++i {
+        ce_attach_debris(debrisToAttach[i]);
+    }
+    for i32 i = 0; i < destroyCount; ++i {
+        b3DestroyShape(shapesToDestroy[i], false);
+    }
+    if attachCount > 0 || destroyCount > 0 {
+        b3Body_ApplyMassFromShapes(g_ce_player);
+    }
+
+    if g_hertz > 0.0f && !g_pause {
+        g_ce_wait -= 1.0f / g_hertz;
+        if g_ce_wait < 0.0f {
+            ce_spawn_debris();
+            g_ce_wait += 0.5f;
+        }
+    }
+
+    draw_text_line("move using WASD");
+    u8[64] buf;
+    ignore snprintf(cast(u8*, &buf), 64, "player shape count = %d", b3Body_GetShapeCount(g_ce_player));
+    draw_text_line(cast(u8*, &buf));
+}

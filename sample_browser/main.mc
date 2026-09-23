@@ -2,7 +2,7 @@
 //
 // Controls
 //   [ / ]    previous / next sample (the menu bar has the full list)
-//   P        pause; O single-step (+Shift: 5 steps); R restart
+//   P        pause; . single-step (+Shift: 5 steps); R restart
 //   F        frame the scene; M metrics drawer; Tab hide the UI
 //   SPACE    launch a ball along the view direction
 //   Ctrl+Q / Esc  quit
@@ -12,7 +12,7 @@
 //   Shift+left-click  launch a ball along the click ray
 //   Alt+left-drag     orbit      Alt+middle-drag  pan
 //   Alt+right-drag    zoom       scroll           zoom
-//   right-drag        fly look; WASD moves, scroll tunes speed
+//   right-drag        fly look; WASD moves, Q/E down/up, scroll tunes speed
 //
 // Scene setups, solver parameters, camera and GUI mirror the upstream
 // samples app. This file holds the entry points.
@@ -48,8 +48,8 @@ import sample_mesh;
 
 void init() {
     // A cached mesh takes two buffers, vertices and edges, so a full
-    // cache is 2 * MESH_CACHE_MAX. The fixed ones on top are the sphere
-    // and capsule impostors, the sky triangle, the overlay line buffer,
+    // cache is 2 * MESH_CACHE_MAX. The fixed ones on top are the
+    // impostor proxy cube, the sky triangle, the overlay line buffer,
     // the edge corners and the instance stream, plus two for sokol_imgui
     // — eight, and the rest of the slack absorbs any added later.
     // sokol's default pool is 128, which Joints/Gear Lift overruns at 74
@@ -63,8 +63,7 @@ void init() {
     simgui_setup(&simgui_desc_t{});
     gui_apply_style();
 
-    build_sphere();
-    build_capsule();
+    build_proxy_cube();
     setup_samples();
     // upstream main.cpp: workerCount = clamp(cores / 2, 1, 8)
     i32 cores = cpu_count();
@@ -86,10 +85,8 @@ void init() {
     // index 0. Named rather than numbered so adding a sample cannot
     // silently move the startup scene.
     load_sample(find_sample("Stacking", "Box Stack"), restart: false);
-    g_sph_vbuf = sg_make_buffer(&sg_buffer_desc{
-        .data.ptr = &g_sph_verts, .data.size = sizeof(g_sph_verts) });
-    g_cap_vbuf = sg_make_buffer(&sg_buffer_desc{
-        .data.ptr = &g_cap_verts, .data.size = sizeof(g_cap_verts) });
+    g_proxy_vbuf = sg_make_buffer(&sg_buffer_desc{
+        .data.ptr = &g_proxy_verts, .data.size = sizeof(g_proxy_verts) });
     // fullscreen triangle for the sky (covers NDC with one tri)
     f32[9] skyVerts = { -1.0f, -1.0f, 0.0f,  3.0f, -1.0f, 0.0f,  -1.0f, 3.0f, 0.0f };
     g_sky_vbuf = sg_make_buffer(&sg_buffer_desc{
@@ -99,11 +96,11 @@ void init() {
     // one InstRec per shape, refilled every frame
     g_inst_vbuf = sg_make_buffer(&sg_buffer_desc{
         .size = cast(i64, INST_MAX * INST_STRIDE),
-        .usage.stream_update = true });
-    // debug channel: a stream-updated line buffer
+        .usage.write_transient = true });
+    // debug channel: a line buffer rewritten each frame it is drawn
     g_dbg_vbuf = sg_make_buffer(&sg_buffer_desc{
         .size = cast(i64, DBG_VERT_MAX * DBG_FLOATS_PER_VERT * 4),
-        .usage.stream_update = true });
+        .usage.write_transient = true });
     sg_shader dbgshd = sokol_make_shader(&b3_dbg_vs_shader, &b3_dbg_fs_shader);
     // Depth ALWAYS, as upstream's overlay pipeline (gfx/overlay.c
     // EnsurePipelines): joint markers sit inside the bodies they join.
@@ -227,12 +224,19 @@ void init() {
             .depth_stencil_attachment.slice = i });
     }
     g_shadow_tex = sg_make_view(&sg_view_desc{ .texture.image = g_shadow_img });
-    // a comparison sampler makes each tap a depth test
+    // A comparison sampler makes each tap a depth test. The white
+    // border means taps past a cascade edge compare against the far
+    // plane and come back lit, which dissolves the boundary across the
+    // filter kernel. Backends without a border mode (WebGL2, WebGPU,
+    // iOS) fall back to clamp-to-edge; b3_fs fades the kernel out over
+    // the edge band for them.
     g_shadow_smp = sg_make_sampler(&sg_sampler_desc{
         .min_filter = SG_FILTER_LINEAR,
         .mag_filter = SG_FILTER_LINEAR,
-        .wrap_u = SG_WRAP_CLAMP_TO_EDGE,
-        .wrap_v = SG_WRAP_CLAMP_TO_EDGE,
+        .wrap_u = SG_WRAP_CLAMP_TO_BORDER,
+        .wrap_v = SG_WRAP_CLAMP_TO_BORDER,
+        .wrap_w = SG_WRAP_CLAMP_TO_EDGE,
+        .border_color = SG_BORDERCOLOR_OPAQUE_WHITE,
         .compare = SG_COMPAREFUNC_LESS_EQUAL,
     });
 
@@ -262,8 +266,10 @@ void init() {
         .depth.compare = SG_COMPAREFUNC_LESS_EQUAL,
         .depth.write_enabled = true,
     });
-    sg_shader dcshd = sokol_make_shader(&b3_inst_cap_depth_vs_shader, &b3_depth_fs_shader);
-    g_pip_inst_depth_cap = sg_make_pipeline(&sg_pipeline_desc{
+    // impostor casters: the proxy cube, depth rebuilt per pixel from
+    // the ray-cast surface
+    sg_shader dcshd = sokol_make_shader(&b3_imp_depth_vs_shader, &b3_imp_depth_fs_shader);
+    g_pip_imp_depth = sg_make_pipeline(&sg_pipeline_desc{
         .shader = dcshd,
         .layout.buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE,
         .layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3,
@@ -287,10 +293,10 @@ void init() {
         .depth.write_enabled = true,
     });
 
-    // capsules: the same state, but a vertex shader that sizes the unit
-    // mesh from the half-length/radius attribute
-    sg_shader cshd = sokol_make_shader(&b3_inst_cap_vs_shader, &b3_fs_shader);
-    g_pip_inst_cap = sg_make_pipeline(&sg_pipeline_desc{
+    // spheres and capsules: the same state over the proxy cube, with the
+    // surface ray-cast and its depth written per pixel
+    sg_shader cshd = sokol_make_shader(&b3_imp_vs_shader, &b3_imp_fs_shader);
+    g_pip_imp = sg_make_pipeline(&sg_pipeline_desc{
         .shader = cshd,
         .layout.buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE,
         .layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3,
@@ -469,14 +475,21 @@ void frame() {
     // per-pass shadow data, uploaded once per lit pipeline below
     ShadowUni shu;
     for i32 c = 0; c < SHADOW_CASCADES; c++ { shu.cascade[c] = g_light_mat[c]; }
-    shu.cascadeFar = float4{g_cascade_far[0], g_cascade_far[1], g_cascade_far[2], 0.0f};
+    shu.cascadeFar = float4{g_cascade_far[0], g_cascade_far[1], g_cascade_far[2], g_cascade_far[3]};
+    shu.cascadeTexelWorld = float4{g_cascade_texel[0], g_cascade_texel[1], g_cascade_texel[2], g_cascade_texel[3]};
+    shu.cascadeDepthBias = float4{g_cascade_bias[0], g_cascade_bias[1], g_cascade_bias[2], g_cascade_bias[3]};
     // The eye is the draw origin, so it is the origin of the frame the
     // shader works in.
     shu.camPos = float4{0.0f, 0.0f, 0.0f, 0.0f};
     // cam_forward points pivot -> eye, so the view direction negates it
     shu.viewDir = float4{0.0f - cam_forward.x, 0.0f - cam_forward.y, 0.0f - cam_forward.z, 0.0f};
-    // x is the PCF tap offset, with the spacing folded in
-    shu.shParams = float4{SHADOW_PCF_SPACING / cast(f32, SHADOW_DIM), 0.35f, 0.0f, 0.0f};
+    // x is one shadow texel in UV; the kernel and its reach scale off it
+    shu.shParams = float4{1.0f / cast(f32, SHADOW_DIM), 0.35f, 0.0f, 0.0f};
+    // the impostors rebuild window depth from the surface they hit
+    f32* vpm = cast(f32*, &viewproj);
+    shu.clipZ = float4{vpm[2], vpm[6], vpm[10], vpm[14]};
+    shu.clipW = float4{vpm[3], vpm[7], vpm[11], vpm[15]};
+    shu.depthRemap = clip_depth_remap();
     // upstream main.cpp: wrap the origin to the grid period in double,
     // before it narrows to float. A float cannot resolve a 1 m cell at
     // 1e7 m, so feeding the raw origin to the grid would shatter the
@@ -594,7 +607,9 @@ void on_event(sapp_event* ev) {
         if ev.key_code == SAPP_KEYCODE_SPACE && !cam_third_person { shoot(); }
         if ev.key_code == SAPP_KEYCODE_R { g_reset_pending = true; }
         if ev.key_code == SAPP_KEYCODE_P { g_pause = !g_pause; }
-        if ev.key_code == SAPP_KEYCODE_O && !ctrl {
+        // Step forward. Upstream steps back on , for a sample that can
+        // rewind; that key and O fall through to the sample.
+        if ev.key_code == SAPP_KEYCODE_PERIOD {
             g_single_step += shift ? 5 : 1;
         }
         if ev.key_code == SAPP_KEYCODE_RIGHT_BRACKET { g_switch_pending = 1; }

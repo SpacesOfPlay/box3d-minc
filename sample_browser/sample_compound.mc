@@ -375,7 +375,8 @@ void build_village() {
         b3MeshData* buildingMesh = create_mesh_data("data/meshes/building.obj", 1.0f,
                                                     false, false, true, true);
 
-        i32 materialCount = buildingMesh.materialCount;
+        // Without the building mesh the village still stands, just with no buildings.
+        i32 materialCount = buildingMesh != null ? buildingMesh.materialCount : 0;
 
         for i32 i = 0; i < materialCount; ++i {
             meshMaterials[i] = b3DefaultSurfaceMaterial();
@@ -391,7 +392,7 @@ void build_village() {
         transform = b3Transform_identity;
 
         i32 meshIndex = 0;
-        for i32 i = 0; i < meshGridCount; ++i {
+        for i32 i = 0; buildingMesh != null && i < meshGridCount; ++i {
             transform.p.x = (2.0f * cast(f32, i) - cast(f32, meshGridCount)) * b + 0.5f * b;
 
             for i32 j = 0; j < meshGridCount; ++j {
@@ -427,7 +428,7 @@ void build_village() {
         def.hulls = hulls;
         def.hullCount = hullCount;
         def.meshes = meshes;
-        def.meshCount = meshCount;
+        def.meshCount = meshIndex;
         def.spheres = spheres;
         def.sphereCount = sphereIndex;
 
@@ -446,7 +447,7 @@ void build_village() {
         free(meshes);
         free(spheres);
 
-        b3DestroyMesh(buildingMesh);
+        if buildingMesh != null { b3DestroyMesh(buildingMesh); }
     }
 
     g_vl_ray_origin = b3Pos{-0.45f * g_vl_world_width, 20.0f, -0.45f * g_vl_world_width};

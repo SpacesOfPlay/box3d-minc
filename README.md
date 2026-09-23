@@ -36,10 +36,10 @@ minc wasm                   # builds, serves, opens the browser
 ## Sample browser controls
 
 - `[` / `]` — previous / next sample; menu bar has the full catalogue
-- `P` pause, `O` single-step (+Shift: 5), `R` restart
+- `P` pause, `.` single-step (+Shift: 5), `R` restart
 - Left-click select, Ctrl+drag grab a body, Shift+click launch a ball
 - Alt+left-drag orbit, Alt+middle pan, Alt+right radial zoom,
-  scroll zoom; right-drag + WASD fly
+  scroll zoom; right-drag + WASD fly, Q / E down / up
 - `F` frame the scene, `M` metrics drawer, `Tab` hide UI, SPACE launch
 
 ## Using the physics from your own code

@@ -7,6 +7,7 @@ type errno_t = i32;
 struct MoverShapeUserData {
     f32 maxPush;
     bool clipVelocity;
+    bool canMoverPush;
 }
 
 struct PlaneExtra {
@@ -191,6 +192,10 @@ void CharacterMover_SolveMove(CharacterMover* self, f32 timeStep, b3Vec3 forward
         b3BodyId bodyId = b3Shape_GetBody(self.m_planeExtras[i].shapeId);
         b3BodyType bodyType = b3Body_GetType(bodyId);
         if bodyType != b3_dynamicBody {
+            continue;
+        }
+        var userData = cast(MoverShapeUserData*, b3Shape_GetUserData(self.m_planeExtras[i].shapeId));
+        if userData != null && userData.canMoverPush == false {
             continue;
         }
         b3Pos point = self.m_planeExtras[i].point;

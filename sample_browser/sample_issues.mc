@@ -1121,3 +1121,49 @@ void step_capsule_mesh(f32 timeStep) {
         draw_text_line("data/meshes/building.obj could not be read");
     }
 }
+
+// samples/sample_issues.cpp HugeBox: very large dynamic bodies overflow
+// the inertia tensor computation.
+b3BodyId g_hb_body;
+
+void build_huge_box() {
+    ignore add_ground_box(400.0f);
+
+    f32 a = 100.0f;
+    b3BoxHull cube = b3MakeCubeHull(a);
+    b3BodyDef bodyDef = b3DefaultBodyDef();
+    bodyDef.name = "cube";
+    bodyDef.type = b3_dynamicBody;
+    bodyDef.position = b3Pos{0.0f, a, 0.0f};
+    bodyDef.rotation = b3MakeQuatFromAxisAngle(b3Vec3{0.0f, 0.0f, 1.0f}, 0.2f);
+    g_hb_body = b3CreateBody(g_world, &bodyDef);
+
+    b3ShapeDef shapeDef = b3DefaultShapeDef();
+    ignore b3CreateHullShape(g_hb_body, &shapeDef, &cube.base);
+}
+
+// samples/sample_issues.cpp HeightfieldIssue: a cylinder wide enough to
+// touch more height-field triangles than B3_MAX_MESH_CONTACT_TRIANGLES,
+// which logs the complex-mesh warning.
+b3HeightFieldData* g_hfi_height_field;
+
+void build_heightfield_issue() {
+    b3ShapeDef shapeDef = b3DefaultShapeDef();
+    b3BodyDef bodyDef = b3DefaultBodyDef();
+
+    g_hfi_height_field = b3CreateGrid(100, 100, b3Vec3{1.0f, 1.0f, 1.0f}, false);
+    b3BodyId groundId = b3CreateBody(g_world, &bodyDef);
+    ignore b3CreateHeightFieldShape(groundId, &shapeDef, g_hfi_height_field);
+
+    b3HullData* hull = b3CreateCylinder(20.0f, 5.0f, -10.0f, 24);
+    bodyDef.type = b3_dynamicBody;
+    bodyDef.position = b3Pos{50.0f, 20.0f, 50.0f};
+    bodyDef.rotation = b3MakeQuatFromAxisAngle(b3Vec3_axisX, PI_F / 4.0f);
+    b3BodyId bodyId = b3CreateBody(g_world, &bodyDef);
+    ignore b3CreateHullShape(bodyId, &shapeDef, hull);
+    b3DestroyHull(hull);
+}
+
+void destroy_heightfield_issue() {
+    b3DestroyHeightField(g_hfi_height_field);
+}

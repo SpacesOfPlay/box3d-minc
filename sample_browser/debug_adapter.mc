@@ -49,7 +49,7 @@ const i32 MESH_KIND_MESH = 1;
 const i32 MESH_KIND_HEIGHTFIELD = 2;
 
 struct CachedMesh {
-    u32 hash;
+    u64 hash;
     i32 refs;
     sg_buffer vbuf;
     i32 nverts;
@@ -164,7 +164,7 @@ bool scratch_tri(b3Vec3 a, b3Vec3 b, b3Vec3 c, b3Vec3 n) {
     return true;
 }
 
-i32 mesh_find(u32 hash) {
+i32 mesh_find(u64 hash) {
     for i32 i = 0; i < MESH_CACHE_MAX; i++ {
         if g_meshes[i].live && g_meshes[i].hash == hash { return i; }
     }
@@ -180,7 +180,7 @@ i32 mesh_alloc_slot() {
 
 // Upload the scratch buffer as a new cache entry, then release it —
 // upstream RegisterMesh followed by BufferFree.
-i32 mesh_commit(u32 hash, i32 kind) {
+i32 mesh_commit(u64 hash, i32 kind) {
     i32 slot = mesh_alloc_slot();
     if slot < 0 || g_scratch_verts == 0 { scratch_free(); return -1; }
     g_meshes[slot].vbuf = sg_make_buffer(&sg_buffer_desc{
@@ -474,7 +474,7 @@ i32 build_height_field(b3HeightFieldData* hf) {
     i32 cols = hf.columnCount;
     i32 rows = hf.rowCount;
     u8* materials = b3GetHeightFieldMaterialIndices(hf);   // null if all solid
-    bool clockwise = hf.clockwise;
+    bool clockwise = hf.clockwise != 0;
 
     // The edge builder refers to grid indices, so the grid is built up
     // front even though triangles duplicate their corners for flat
@@ -1395,9 +1395,19 @@ b3DebugDraw adapter_make_debug_draw() {
     // upstream Camera::DrawBounds (sample.cpp:490): a cube of the draw
     // distance about the eye. Box3D uses it to pick the draw set.
     f32 h = cam_draw_distance;
+    // A caster between the view and the sun is off screen but still
+    // darkens what is on screen, so the draw set has to reach past the
+    // view box. The caster bounds come back eye-relative.
+    float3 casterLo;
+    float3 casterHi;
+    shadow_caster_bounds(&casterLo, &casterHi);
     d.drawingBounds = b3AABB{
-        b3Pos{cam_eye.x - h, cam_eye.y - h, cam_eye.z - h},
-        b3Pos{cam_eye.x + h, cam_eye.y + h, cam_eye.z + h}};
+        b3Pos{b3MinFloat(cam_eye.x - h, cam_eye.x + casterLo.x),
+              b3MinFloat(cam_eye.y - h, cam_eye.y + casterLo.y),
+              b3MinFloat(cam_eye.z - h, cam_eye.z + casterLo.z)},
+        b3Pos{b3MaxFloat(cam_eye.x + h, cam_eye.x + casterHi.x),
+              b3MaxFloat(cam_eye.y + h, cam_eye.y + casterHi.y),
+              b3MaxFloat(cam_eye.z + h, cam_eye.z + casterHi.z)}};
     d.context = null;
     return d;
 }
@@ -1495,10 +1505,12 @@ AdapterDraw achild_draw(AdapterDraw* d, AdapterChild* ch) {
 // have a centre, capsules an axis.
 float4x4 adraw_model(AdapterDraw* d) {
     if d.kind == ASHAPE_SPHERE {
+        // the impostor sizes itself from params; the rotation still
+        // orients the surface rings
         b3Vec3 wo = b3RotateVector(d.xf.q, d.c1);
         return make_model(d.xf.q,
                           d.xf.p.x + wo.x, d.xf.p.y + wo.y, d.xf.p.z + wo.z,
-                          d.radius, d.radius, d.radius);
+                          1.0f, 1.0f, 1.0f);
     }
     if d.kind == ASHAPE_CAPSULE {
         f32 mx = 0.5f * (d.c1.x + d.c2.x);
@@ -1522,13 +1534,17 @@ float4x4 adraw_model(AdapterDraw* d) {
                       d.scale.x, d.scale.y, d.scale.z);
 }
 
-// The capsule mesh sizes itself in the shader from params.yz.
+// The impostors size themselves in the shader: params.y is the
+// half-length, params.z the radius, params.w marks a sphere.
 f32 inv_scale_sq(f32 s) {
     if s == 0.0f { return 1.0f; }
     return 1.0f / (s * s);
 }
 
 float4 adraw_params(AdapterDraw* d) {
+    if d.kind == ASHAPE_SPHERE {
+        return float4{0.0f, 0.0f, d.radius, 1.0f};
+    }
     if d.kind == ASHAPE_CAPSULE {
         f32 dx = d.c2.x - d.c1.x;
         f32 dy = d.c2.y - d.c1.y;
@@ -1585,7 +1601,7 @@ InstRec[INST_MAX] g_inst;        // grouped by bucket, the upload image
 i32 g_inst_count;
 i32 g_inst_dropped;
 i32 g_inst_mirror;               // instances in mirrored buckets
-i32 g_inst_caps;                 // instances in capsule buckets
+i32 g_inst_imp;                  // instances in the impostor buckets
 sg_buffer g_inst_vbuf;
 
 i32 ibucket_find(i32 cls, i32 mesh, bool mirror, bool casts) {
@@ -1637,7 +1653,7 @@ void inst_emit(AdapterDraw* d, i32 cls, bool visible) {
     if visible { g_ibuckets[bi].vis++; }
     g_inst_count++;
     if mirror { g_inst_mirror++; }
-    if cls == ICLS_CAPSULE { g_inst_caps++; }
+    if cls != ICLS_MESH { g_inst_imp++; }
 }
 
 i32 inst_class(i32 kind) {
@@ -1656,7 +1672,7 @@ void adapter_build_instances(float4x4* viewproj) {
     g_inst_count = 0;
     g_inst_dropped = 0;
     g_inst_mirror = 0;
-    g_inst_caps = 0;
+    g_inst_imp = 0;
     g_ccd_frame = 0;
 
     for i32 i = 0; i < g_adraw_count; i++ {
@@ -1698,21 +1714,24 @@ void adapter_build_instances(float4x4* viewproj) {
             b.fillBack--;
         }
     }
-    // sokol allows one update per stream buffer per frame, so every pass
-    // draws out of this one upload
-    sg_update_buffer(g_inst_vbuf, &sg_range{
-        .ptr = &g_inst, .size = cast(i64, g_inst_count * INST_STRIDE) });
+    // One upload feeds every pass this frame. A write-transient buffer
+    // rejects an empty write, and no bucket draws when nothing is
+    // instanced, so an empty frame skips it.
+    if g_inst_count > 0 {
+        sg_write_buffer_transient(&sg_write_buffer_desc{
+            .src.data.ptr = &g_inst,
+            .src.data.size = cast(i64, g_inst_count * INST_STRIDE),
+            .dst.buffer = g_inst_vbuf });
+    }
 }
 
 sg_buffer ibucket_vbuf(IBucket* b) {
-    if b.cls == ICLS_SPHERE { return g_sph_vbuf; }
-    if b.cls == ICLS_CAPSULE { return g_cap_vbuf; }
+    if b.cls != ICLS_MESH { return g_proxy_vbuf; }
     return g_meshes[b.mesh].vbuf;
 }
 
 i32 ibucket_nverts(IBucket* b) {
-    if b.cls == ICLS_SPHERE { return g_sph_nverts; }
-    if b.cls == ICLS_CAPSULE { return g_cap_nverts; }
+    if b.cls != ICLS_MESH { return PROXY_NVERTS; }
     return g_meshes[b.mesh].nverts;
 }
 
@@ -1744,16 +1763,25 @@ void adapter_draw_depth(i32 cascade) {
     sg_apply_uniforms(0, &sg_range{ .ptr = &ip, .size = sizeof(ip) });
     for i32 i = 0; i < g_ibucket_count; i++ {
         IBucket* b = &g_ibuckets[i];
-        if !b.casts || b.cls == ICLS_CAPSULE { continue; }
+        if !b.casts || b.cls != ICLS_MESH { continue; }
         ibucket_draw(b, false);
     }
 
-    if g_inst_caps == 0 { return; }
-    sg_apply_pipeline(g_pip_inst_depth_cap);
+    if g_inst_imp == 0 { return; }
+    // The impostor casters march from the proxy face along the light
+    // and write the depth of the surface they hit, in window units:
+    // the z row of the texture-space matrix, which is what the lit
+    // pass compares against.
+    CasterPass cp;
+    cp.lightDir = float4{0.0f - SUN_X, 0.0f - SUN_Y, 0.0f - SUN_Z, 0.0f};
+    f32* lm = cast(f32*, &g_light_mat[cascade]);
+    cp.depthRow = float4{lm[2], lm[6], lm[10], lm[14]};
+    sg_apply_pipeline(g_pip_imp_depth);
     sg_apply_uniforms(0, &sg_range{ .ptr = &ip, .size = sizeof(ip) });
+    sg_apply_uniforms(1, &sg_range{ .ptr = &cp, .size = sizeof(cp) });
     for i32 i = 0; i < g_ibucket_count; i++ {
         IBucket* b = &g_ibuckets[i];
-        if !b.casts || b.cls != ICLS_CAPSULE { continue; }
+        if !b.casts || b.cls == ICLS_MESH { continue; }
         ibucket_draw(b, false);
     }
 }
@@ -1772,18 +1800,18 @@ void adapter_draw_lit(float4x4* viewproj, ShadowUni* shu) {
         sg_apply_uniforms(1, &sg_range{ .ptr = shu, .size = sizeof(*shu) });
         for i32 i = 0; i < g_ibucket_count; i++ {
             IBucket* b = &g_ibuckets[i];
-            if b.mirror != mirror || b.cls == ICLS_CAPSULE { continue; }
+            if b.mirror != mirror || b.cls != ICLS_MESH { continue; }
             ibucket_draw(b, true);
         }
     }
 
-    if g_inst_caps == 0 { return; }
-    sg_apply_pipeline(g_pip_inst_cap);
+    if g_inst_imp == 0 { return; }
+    sg_apply_pipeline(g_pip_imp);
     sg_apply_uniforms(0, &sg_range{ .ptr = &ip, .size = sizeof(ip) });
     sg_apply_uniforms(1, &sg_range{ .ptr = shu, .size = sizeof(*shu) });
     for i32 i = 0; i < g_ibucket_count; i++ {
         IBucket* b = &g_ibuckets[i];
-        if b.cls != ICLS_CAPSULE { continue; }
+        if b.cls == ICLS_MESH { continue; }
         ibucket_draw(b, true);
     }
 }
@@ -1791,9 +1819,10 @@ void adapter_draw_lit(float4x4* viewproj, ShadowUni* shu) {
 // Upload the line work and draw it in one call.
 void adapter_draw_debug_lines(float4x4* viewproj) {
     if g_dbg_vert_count == 0 { return; }
-    sg_update_buffer(g_dbg_vbuf, &sg_range{
-        .ptr = &g_dbg_verts,
-        .size = cast(i64, g_dbg_vert_count * DBG_FLOATS_PER_VERT * 4) });
+    sg_write_buffer_transient(&sg_write_buffer_desc{
+        .src.data.ptr = &g_dbg_verts,
+        .src.data.size = cast(i64, g_dbg_vert_count * DBG_FLOATS_PER_VERT * 4),
+        .dst.buffer = g_dbg_vbuf });
     sg_apply_pipeline(g_pip_dbg);
     sg_apply_bindings(&sg_bindings{ .vertex_buffers[0] = g_dbg_vbuf });
     DbgUni u;

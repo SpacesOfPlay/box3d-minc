@@ -502,6 +502,12 @@ void frame() {
         cast(f32, fmod(cast(f64, cam_eye.z), gridPeriod)),
         cam_eye.x, cam_eye.z};
 
+    // upstream drains the label arena in the GUI shell, after the scene:
+    // world positions project with the camera that renders this frame.
+    // ImGui's draw data is finalized before the pass (simgui_flush).
+    label_flush(&viewproj);
+    simgui_flush();
+
     sg_begin_pass(&sg_pass{
         .swapchain = sglue_swapchain(),
         .action.colors[0].load_action = SG_LOADACTION_CLEAR,
@@ -531,11 +537,7 @@ void frame() {
     // debug channel
     adapter_draw_debug_lines(&viewproj);
 
-    // upstream drains the label arena in the GUI shell, after the scene:
-    // world positions project with the camera that just rendered.
-    label_flush(&viewproj);
-
-    simgui_render();
+    simgui_draw();
     sg_end_pass();
     sg_commit();
 }
